@@ -180,6 +180,7 @@ function buildPipeline() {
   });
   pipeline.on('processing', (d) => overlayWin?.webContents.send('pipeline:processing', d));
   pipeline.on('transcript', (t) => overlayWin?.webContents.send('pipeline:transcript',  t));
+  pipeline.on('partial-transcript', (t) => overlayWin?.webContents.send('pipeline:partial-transcript', t));
   pipeline.on('translation:partial', (d) => overlayWin?.webContents.send('pipeline:translation:partial', d));
   pipeline.on('translation', (d) => {
     overlayWin?.webContents.send('pipeline:translation', d);

@@ -16,10 +16,10 @@ const defaults = {
   audioInputDevice:  '',             // WASAPI capture device name (empty = default)
   audioOutputDevice: '',             // WASAPI render device name for loopback (empty = default)
   sampleRate:        16000,
-  chunkMaxMs:        3000,           // max ms of audio before forced flush
-  silenceMs:         500,            // ms of silence that triggers flush
-  silenceRMS:        300,            // RMS amplitude below this = silence
-  minSpeechMs:       200,            // min speech content before silence flush triggers
+  chunkMaxMs:        10000,          // max ms of audio before forced flush (10s — allow full sentences)
+  silenceMs:         1200,           // ms of silence that triggers flush (1.2s — natural pause)
+  silenceRMS:        250,            // RMS amplitude below this = silence
+  minSpeechMs:       400,            // min speech content before silence flush triggers
 
   // ── Whisper STT ───────────────────────────────────────────────────
   whisperEndpoint:   'http://127.0.0.1:8080',  // dùng IP trực tiếp, tránh Node.js resolve localhost → IPv6

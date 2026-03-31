@@ -34,8 +34,10 @@ let running      = false;
 let clickThrough = false;
 /** @type {RendererAudioCapture|null} */
 let audioCapture = null;
-let segments     = [];   // [{ id, el, transEl }] currently visible
-let _lastTransEl = null; // transEl của segment đang chờ dịch (pending)
+let segments     = [];           // [{ id, el, transEl }] các segment đã hiển thị
+let _liveEl      = null;         // segment đang ghi live (typing)
+let _liveOrigEl  = null;         // .seg-orig trong live segment
+const _pendingTrans = new Map(); // id → transEl — đang chờ dịch
 const MAX_SEG    = 6;
 
 // ── UI helpers ────────────────────────────────────────────────────────────
@@ -48,10 +50,13 @@ function setRunning(r) {
     // Starting new session — clear previous segments
     segments.forEach((s) => s.el.remove());
     segments     = [];
-    _lastTransEl = null;
+    if (_liveEl) { _liveEl.remove(); _liveEl = null; _liveOrigEl = null; }
+    _pendingTrans.clear();
     pendingSegEl.classList.add('hidden');
     statusMsg.textContent = 'Đang nghe…';
   } else {
+    // Remove stray live segment if pipeline stopped mid-word
+    if (_liveEl) { _liveEl.remove(); _liveEl = null; _liveOrigEl = null; }
     statusMsg.textContent = 'Nhấn ▶ để bắt đầu';
   }
 }
@@ -172,11 +177,10 @@ async function handleToggle() {
 btnToggle.addEventListener('click', handleToggle);
 
 btnClear.addEventListener('click', () => {
-  // Xóa tất cả segment đã hiển thị
   segments.forEach((s) => s.el.remove());
   segments     = [];
-  _lastTransEl = null;
-  // Ẩn pending segment nếu có
+  if (_liveEl) { _liveEl.remove(); _liveEl = null; _liveOrigEl = null; }
+  _pendingTrans.clear();
   pendingSegEl.classList.add('hidden');
 });
 
@@ -201,32 +205,58 @@ ipc.on('pipeline:status', (d) => {
 
 ipc.on('pipeline:processing', (d) => setStage(d.stage));
 
-// pipeline:transcript — thêm segment ngay với trạng thái đang dịch
-ipc.on('pipeline:transcript', ({ text, timestamp }) => {
-  _lastTransEl = addSegment({
-    id:         `pending-${Date.now()}`,
-    timestamp,
-    original:   text,
-    translated: null,
-    pending:    true,
-  });
+// pipeline:partial-transcript — hiển thị live typing trong chat
+ipc.on('pipeline:partial-transcript', ({ text, timestamp }) => {
+  if (!_liveEl) {
+    _liveEl = document.createElement('div');
+    _liveEl.className = 'segment segment--live';
+    _liveEl.innerHTML =
+      `<span class="seg-ts">${fmtTime(timestamp)}</span>` +
+      `<div class="seg-body">` +
+        `<div class="seg-orig"></div>` +
+        `<div class="seg-trans"></div>` +
+      `</div>`;
+    segContainer.appendChild(_liveEl);
+    _liveOrigEl = _liveEl.querySelector('.seg-orig');
+    // Giới hạn số segment hiển thị
+    while (segments.length >= MAX_SEG) segments.shift().el.remove();
+  }
+  _liveOrigEl.innerHTML = escHtml(text) + '<span class="typing-cursor"> ▌</span>';
+  segContainer.scrollTop = segContainer.scrollHeight;
+});
+
+// pipeline:transcript — chốt live segment thành pending dịch
+ipc.on('pipeline:transcript', ({ text, timestamp, id }) => {
+  if (_liveEl) {
+    // Nâng cấp live → pending
+    _liveEl.className = 'segment segment--pending';
+    _liveOrigEl.innerHTML = escHtml(text);
+    const transEl = _liveEl.querySelector('.seg-trans');
+    transEl.innerHTML = '⏳ Đang dịch…';
+    segments.push({ id, el: _liveEl, transEl });
+    while (segments.length > MAX_SEG) segments.shift().el.remove();
+    _pendingTrans.set(id, transEl);
+    _liveEl = null;
+    _liveOrigEl = null;
+  } else {
+    // Không có live segment (audio rất ngắn, chưa kịp emit partial)
+    const transEl = addSegment({ id, timestamp, original: text, translated: null, pending: true });
+    _pendingTrans.set(id, transEl);
+  }
   clearError();
 });
 
-// pipeline:translation — update in-place trên segment đã có
+// pipeline:translation — cập nhật theo id
 ipc.on('pipeline:translation', ({ original, translated, timestamp, id }) => {
-  if (_lastTransEl) {
-    // Cập nhật bản dịch vào đúng segment đó
-    _lastTransEl.innerHTML = translated
+  const transEl = _pendingTrans.get(id);
+  if (transEl) {
+    transEl.innerHTML = translated
       ? escHtml(translated)
       : '<em style="opacity:.35">—</em>';
-    _lastTransEl.closest('.segment')?.classList.remove('segment--pending');
-    // Cập nhật id thật từ pipeline
-    const seg = segments.find(s => s.transEl === _lastTransEl);
-    if (seg) seg.id = id;
-    _lastTransEl = null;
+    transEl.closest('.segment')?.classList.remove('segment--pending');
+    _pendingTrans.delete(id);
   } else {
-    // Không có pending (hiếm gặp) — thêm mới
+    // Fallback: không tìm thấy segment theo id
     addSegment({ id, timestamp, original, translated });
   }
   clearError();

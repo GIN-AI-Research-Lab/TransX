@@ -156,6 +156,16 @@ body {
 .segment--pending .seg-ts   { color: rgba(255,152,0,0.45); }
 .segment--pending .seg-trans { color: rgba(255,152,0,0.70); font-style: italic; }
 
+.segment--live .seg-orig { color: rgba(255,255,255,0.60); }
+.segment--live .seg-trans { display: none; }
+
+.typing-cursor {
+  display: inline-block;
+  color: rgba(255,255,255,0.55);
+  animation: cursor-blink .7s step-end infinite;
+}
+@keyframes cursor-blink { 0%,100% { opacity:1 } 50% { opacity:0 } }
+
 /* ── Status bar ──────────────────────────────────────────────────────── */
 #statusbar {
   display: flex;

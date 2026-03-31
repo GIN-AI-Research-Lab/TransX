@@ -30,6 +30,9 @@ function fmtTime(ms) {
 }
 
 const CONTEXT_WINDOW = 5; // số câu giữ lại làm ngữ cảnh
+const BLANK_PATTERN  = /^\s*\[[\w\s]+\]\s*$|^\s*\([\w\s]+\)\s*$/i;
+// Detect sentence-ending punctuation (multi-language)
+const SENTENCE_END   = /[.?!\u3002\uff01\uff1f\u0964\u2026]['")\]\u300d]*\s*$/u;
 
 class Pipeline extends EventEmitter {
   constructor(cfg = {}) {
@@ -45,11 +48,14 @@ class Pipeline extends EventEmitter {
     this.translator = new NLLBTranslator(cfg);
 
     this.isRunning    = false;
-    this._queue       = [];
-    this._processing  = false;
-    this._startTime   = null;   // wall-clock khi pipeline start
-    this._segId       = 0;      // ID tăng dần cho mỗi segment
-    this._context     = [];     // [{original, translated}] — cửa sổ ngữ cảnh
+    this._queue       = [];      // full audio chunks waiting for STT
+    this._transQueue  = [];      // transcripts waiting for translation
+    this._sttBusy     = false;
+    this._transBusy   = false;
+    this._whisperBusy = false;   // guard against concurrent Whisper calls
+    this._startTime   = null;
+    this._segId       = 0;
+    this._context     = [];
   }
 
   // ── Start / Stop ──────────────────────────────────────────────────
@@ -67,11 +73,15 @@ class Pipeline extends EventEmitter {
     }
 
     this.abuf.removeAllListeners('chunk');
+    this.abuf.removeAllListeners('partial');
     this.abuf.on('chunk', (buf, startMs) => {
-      // timestamp = elapsed ms tính từ khi pipeline start
       const elapsed = startMs - this._startTime;
       this._queue.push({ buf, timestamp: elapsed });
-      this._drain();
+      this._drainSTT();
+    });
+    this.abuf.on('partial', (buf, startMs) => {
+      const elapsed = startMs - this._startTime;
+      this._handlePartial(buf, elapsed);
     });
 
     this._startTime = Date.now();
@@ -85,8 +95,10 @@ class Pipeline extends EventEmitter {
     if (!this.isRunning) return;
     this.abuf.reset();
     this.abuf.removeAllListeners('chunk');
-    this._queue   = [];
-    this._context = [];
+    this.abuf.removeAllListeners('partial');
+    this._queue      = [];
+    this._transQueue = [];
+    this._context    = [];
     this.isRunning = false;
     this.emit('stopped');
   }
@@ -114,78 +126,102 @@ class Pipeline extends EventEmitter {
     });
   }
 
-  // ── Internal queue drain ─────────────────────────────────────────
-  async _drain() {
-    if (this._processing) return;
-    this._processing = true;
+  // ── Internal: partial audio preview ─────────────────────────────
+  async _handlePartial(buf, timestamp) {
+    // Skip if Whisper is currently busy — avoid flooding the server
+    if (this._whisperBusy) return;
+    this._whisperBusy = true;
+    try {
+      const text = await this.whisper.transcribe(buf);
+      if (text && !BLANK_PATTERN.test(text.trim())) {
+        const trimmed = text.trim();
+        this.emit('partial-transcript', { text: trimmed, timestamp });
+        // Câu kết thúc bằng dấu câu → flush ngay, không cần đợi im lặng
+        if (SENTENCE_END.test(trimmed)) {
+          this._whisperBusy = false;
+          this.abuf.forceFlush();
+          return;
+        }
+      }
+    } catch {
+      // Ignore partial errors silently
+    } finally {
+      this._whisperBusy = false;
+    }
+  }
+
+  // ── Internal: STT queue drain ────────────────────────────────────
+  async _drainSTT() {
+    if (this._sttBusy) return;
+    this._sttBusy = true;
     while (this._queue.length > 0) {
       const item = this._queue.shift();
       try {
-        await this._processChunk(item.buf, item.timestamp);
+        await this._doSTT(item);
       } catch (err) {
         this.emit('error', err);
       }
     }
-    this._processing = false;
+    this._sttBusy = false;
+    this.emit('processing', { stage: 'idle' });
   }
 
-  async _processChunk(pcm, timestamp) {
-    // ── STT ──
+  async _doSTT({ buf, timestamp }) {
+    this._whisperBusy = true;
     this.emit('processing', { stage: 'stt' });
     let transcript = '';
     try {
-      transcript = await this.whisper.transcribe(pcm);
+      transcript = await this.whisper.transcribe(buf);
     } catch (err) {
+      this._whisperBusy = false;
       throw new Error(`STT failed: ${err.message}`);
     }
+    this._whisperBusy = false;
 
-    if (!transcript) {
-      this.emit('processing', { stage: 'idle' });
-      return;
-    }
+    if (!transcript || BLANK_PATTERN.test(transcript.trim())) return;
 
-    // Bỏ qua các nhãn đặc biệt Whisper trả về khi không nhận diện được âm thanh
-    const BLANK_PATTERN = /^\s*\[[\w\s]+\]\s*$|^\s*\([\w\s]+\)\s*$/i;
-    if (BLANK_PATTERN.test(transcript)) {
-      this.emit('processing', { stage: 'idle' });
-      return;
-    }
+    transcript = transcript.trim();
+    const id = ++this._segId;
+    this.emit('transcript', { text: transcript, timestamp, id });
 
-    this.emit('transcript', { text: transcript, timestamp });
-
-    // ── Translation ──
     if (!this.cfg.translateEnabled) {
-      // Không dịch: vẫn tạo segment chỉ có original
       this._addContext(transcript, '');
-      this.emit('translation', {
-        original:   transcript,
-        translated: '',
-        timestamp,
-        id: ++this._segId,
-      });
-      this.emit('processing', { stage: 'idle' });
+      this.emit('translation', { original: transcript, translated: '', timestamp, id });
       return;
     }
 
+    // Enqueue translation — runs in background (don't await)
+    this._transQueue.push({ transcript, timestamp, id });
+    this._drainTranslation();
+  }
+
+  // ── Internal: Translation queue drain ───────────────────────────
+  async _drainTranslation() {
+    if (this._transBusy) return;
+    this._transBusy = true;
+    while (this._transQueue.length > 0) {
+      const item = this._transQueue.shift();
+      try {
+        await this._doTranslation(item);
+      } catch (err) {
+        this.emit('error', err);
+      }
+    }
+    this._transBusy = false;
+  }
+
+  async _doTranslation({ transcript, timestamp, id }) {
     this.emit('processing', { stage: 'translation' });
     let translated = '';
     try {
-      // NLLB-200 generates translation in one pass (no streaming)
       translated = await this.translator.translate(transcript);
     } catch (err) {
       throw new Error(`Translation failed: ${err.message}`);
     }
-
     if (translated) {
       this._addContext(transcript, translated);
-      this.emit('translation', {
-        original:   transcript,
-        translated,
-        timestamp,
-        id: ++this._segId,
-      });
+      this.emit('translation', { original: transcript, translated, timestamp, id });
     }
-    this.emit('processing', { stage: 'idle' });
   }
 
   /** Thêm vào cửa sổ ngữ cảnh, giữ tối đa CONTEXT_WINDOW câu */

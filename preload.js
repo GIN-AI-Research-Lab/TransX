@@ -27,11 +27,11 @@ const INVOKE_CHANNELS = new Set([
 const LISTEN_CHANNELS = new Set([
   'pipeline:status',
   'pipeline:processing',
+  'pipeline:partial-transcript',
   'pipeline:transcript',
   'pipeline:translation',
   'pipeline:translation:partial',
   'pipeline:error',
-  'tts:speak',
   'setup:progress',
 ]);
 

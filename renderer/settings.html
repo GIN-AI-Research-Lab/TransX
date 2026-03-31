@@ -348,19 +348,25 @@
 
     <div class="row2">
       <div class="field">
-        <label>Max chunk — <span id="chunkMaxMs-val">5000</span>ms</label>
-        <input type="range" id="chunkMaxMs" min="1000" max="10000" step="500" value="5000">
+        <label>Max chunk — <span id="chunkMaxMs-val">10000</span>ms</label>
+        <input type="range" id="chunkMaxMs" min="2000" max="20000" step="500" value="10000">
       </div>
       <div class="field">
-        <label>Silence flush — <span id="silenceMs-val">900</span>ms</label>
-        <input type="range" id="silenceMs" min="300" max="2000" step="100" value="900">
+        <label>Silence flush — <span id="silenceMs-val">1200</span>ms</label>
+        <input type="range" id="silenceMs" min="300" max="3000" step="100" value="1200">
       </div>
     </div>
 
     <div class="field">
-      <label>Silence RMS threshold — <span id="silenceRMS-val">280</span></label>
-      <input type="range" id="silenceRMS" min="50" max="1000" step="10" value="280">
+      <label>Silence RMS threshold — <span id="silenceRMS-val">250</span></label>
+      <input type="range" id="silenceRMS" min="50" max="800" step="10" value="250">
     </div>
+
+    <p style="font-size:11px;color:#6c7086">
+      <strong>Max chunk</strong>: thời gian tối đa một câu (10s — phù hợp với câu dài).<br>
+      <strong>Silence flush</strong>: chờ bao lâu sau khoảng lặng rồi mới cắt câu. Tăng nếu hay bị ngắt giữa chừng.<br>
+      <strong>RMS threshold</strong>: ngưỡng nhận biết lặng — giảm xuống nếu micro bắt nhiều tiếng ồn nền.
+    </p>
   </section>
 
   <!-- ── Footer ────────────────────────────────────────────────── -->

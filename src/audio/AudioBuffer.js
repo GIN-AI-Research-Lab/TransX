@@ -33,8 +33,11 @@ class AudioBuffer extends EventEmitter {
     this.silenceRMS   = opts.silenceRMS   || 280;
     this.minSpeechMs  = opts.minSpeechMs  || 300;
 
+    this._partialIntervalMs = opts.partialIntervalMs || 1500;
+
     this._buf         = Buffer.alloc(0);
     this._silenceTimer = null;
+    this._partialTimer = null;
     this._chunkStartMs = null;  // wall-clock khi chunk bắt đầu tích lũy
   }
 
@@ -65,7 +68,9 @@ class AudioBuffer extends EventEmitter {
   push(chunk) {    // Ghi nhớ thời điểm bắt đầu chunk mới
     if (this._buf.length === 0) {
       this._chunkStartMs = Date.now();
-    }    this._buf = Buffer.concat([this._buf, chunk]);
+      this._startPartialTimer();
+    }
+    this._buf = Buffer.concat([this._buf, chunk]);
 
     const isSilent = this._rms(chunk) < this.silenceRMS;
 
@@ -93,12 +98,18 @@ class AudioBuffer extends EventEmitter {
 
   _flush() {
     this._clearTimer();
+    this._clearPartialTimer();
     if (this._buf.length >= this._minSpeechBytes) {
       // Emit (buf, startMs) — startMs dùng để hiển thị mốc thời gian
       this.emit('chunk', Buffer.from(this._buf), this._chunkStartMs || Date.now());
     }
     this._buf = Buffer.alloc(0);
     this._chunkStartMs = null;
+  }
+
+  /** Flush ngay lập tức (dùng khi phát hiện cuối câu qua Whisper partial). */
+  forceFlush() {
+    this._flush();
   }
 
   _clearTimer() {
@@ -108,9 +119,27 @@ class AudioBuffer extends EventEmitter {
     }
   }
 
+  _startPartialTimer() {
+    if (this._partialTimer) return;
+    this._partialTimer = setInterval(() => {
+      if (this._buf.length >= this._minSpeechBytes) {
+        this.emit('partial', Buffer.from(this._buf), this._chunkStartMs || Date.now());
+      }
+    }, this._partialIntervalMs);
+  }
+
+  _clearPartialTimer() {
+    if (this._partialTimer) {
+      clearInterval(this._partialTimer);
+      this._partialTimer = null;
+    }
+  }
+
   reset() {
     this._clearTimer();
+    this._clearPartialTimer();
     this._buf = Buffer.alloc(0);
+    this._chunkStartMs = null;
   }
 }
 
