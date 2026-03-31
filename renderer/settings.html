@@ -223,85 +223,25 @@
     </p>
   </section>
 
-  <!-- ── STT panel ───────────────────────────────────────────────── -->
-  <section class="panel" id="panel-stt">
-    <p class="section-title">Whisper STT</p>
-
-    <div class="field">
-      <label for="whisperEndpoint">Whisper server endpoint</label>
-      <input id="whisperEndpoint" type="text" placeholder="http://localhost:8080">
-    </div>
-
-    <div class="field">
-      <label for="whisperLanguage">Audio language</label>
-      <select id="whisperLanguage">
-        <option value="auto">Auto-detect</option>
-        <option value="en">English</option>
-        <option value="vi">Vietnamese</option>
-        <option value="zh">Chinese</option>
-        <option value="ja">Japanese</option>
-        <option value="ko">Korean</option>
-        <option value="fr">French</option>
-        <option value="de">German</option>
-        <option value="es">Spanish</option>
-        <option value="ru">Russian</option>
-        <option value="th">Thai</option>
-        <option value="ar">Arabic</option>
-      </select>
-    </div>
-
-    <p style="font-size:11px;color:#6c7086">
-      Start <strong>whisper.cpp</strong> server:<br>
-      <code style="color:#fab387">whisper-server.exe -m ggml-base.en.bin --host 127.0.0.1 --port 8080</code><br><br>
-      Or <strong>faster-whisper-server</strong>:<br>
-      <code style="color:#fab387">uvicorn faster_whisper_server.main:app --port 8080</code>
-    </p>
-  </section>
-
   <!-- ── Translation panel ──────────────────────────────────────── -->
   <section class="panel" id="panel-translate">
     <p class="section-title">Languages</p>
 
     <div class="row2">
       <div class="field">
-        <label for="sourceLanguage">Ngôn ngữ nguồn</label>
+        <label for="sourceLanguage">Ngôn ngữ nguồn (Whisper + NLLB)</label>
         <select id="sourceLanguage">
-          <option value="auto">Auto-detect (defaults to English)</option>
           <option value="English">English</option>
-          <option value="Vietnamese">Vietnamese — Tiếng Việt</option>
-          <option value="Chinese">Chinese — 中文</option>
           <option value="Japanese">Japanese — 日本語</option>
-          <option value="Korean">Korean — 한국어</option>
-          <option value="French">French — Français</option>
-          <option value="German">German — Deutsch</option>
-          <option value="Spanish">Spanish — Español</option>
-          <option value="Russian">Russian — Русский</option>
-          <option value="Thai">Thai — ภาษาไทย</option>
-          <option value="Arabic">Arabic — العربية</option>
-          <option value="Portuguese">Portuguese — Português</option>
-          <option value="Italian">Italian — Italiano</option>
-          <option value="Hindi">Hindi — हिन्दी</option>
-          <option value="Indonesian">Indonesian — Bahasa Indonesia</option>
+          <option value="Vietnamese">Vietnamese — Tiếng Việt</option>
         </select>
       </div>
       <div class="field">
         <label for="targetLanguage">Ngôn ngữ đích</label>
         <select id="targetLanguage">
-          <option value="Vietnamese">Tiếng Việt</option>
+          <option value="Vietnamese">Vietnamese — Tiếng Việt</option>
           <option value="English">English</option>
-          <option value="Chinese">Chinese — 中文</option>
           <option value="Japanese">Japanese — 日本語</option>
-          <option value="Korean">Korean — 한국어</option>
-          <option value="French">French — Français</option>
-          <option value="German">German — Deutsch</option>
-          <option value="Spanish">Spanish — Español</option>
-          <option value="Russian">Russian — Русский</option>
-          <option value="Thai">Thai — ภาษาไทย</option>
-          <option value="Arabic">Arabic — العربية</option>
-          <option value="Portuguese">Portuguese — Português</option>
-          <option value="Italian">Italian — Italiano</option>
-          <option value="Hindi">Hindi — हिन्दी</option>
-          <option value="Indonesian">Indonesian — Bahasa Indonesia</option>
         </select>
       </div>
     </div>

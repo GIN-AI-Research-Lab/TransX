@@ -102,9 +102,18 @@ body {
   flex-direction: column;
   gap: 5px;
   padding: 8px 10px 4px;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.18) transparent;
 }
-#segments-container::-webkit-scrollbar { display: none; }
+#segments-container::-webkit-scrollbar { width: 4px; }
+#segments-container::-webkit-scrollbar-track { background: transparent; }
+#segments-container::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 2px;
+}
+#segments-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.35);
+}
 
 .segment {
   display: flex;
@@ -187,3 +196,123 @@ body {
 @keyframes rotate { to { transform: rotate(360deg); } }
 
 .hidden { display: none !important; }
+
+/* ── Settings dropdown panel ─────────────────────────────────────────── */
+#app { position: relative; }
+
+#settings-panel {
+  position: absolute;
+  top: 32px;
+  left: 0; right: 0;
+  z-index: 200;
+  background: rgba(18, 18, 30, 0.98);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(255,255,255,0.10);
+  border-left:   1px solid rgba(255,255,255,0.07);
+  border-right:  1px solid rgba(255,255,255,0.07);
+  border-radius: 0 0 10px 10px;
+  display: flex;
+  flex-direction: column;
+  max-height: 400px;
+  -webkit-app-region: no-drag;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+
+.sp-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.sp-body::-webkit-scrollbar { width: 4px; }
+.sp-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+.sp-section { border-bottom: 1px solid rgba(255,255,255,0.05); }
+.sp-section:last-child { border-bottom: none; }
+
+.sp-section-title {
+  list-style: none;
+  padding: 7px 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #89b4fa;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sp-section-title::-webkit-details-marker { display: none; }
+.sp-section-title::after {
+  content: '▸';
+  margin-left: auto;
+  font-size: 9px;
+  color: rgba(255,255,255,0.3);
+  transition: transform .15s;
+}
+details[open] > .sp-section-title::after { transform: rotate(90deg); }
+
+.sp-section-body {
+  padding: 2px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sp-field { display: flex; flex-direction: column; gap: 3px; }
+.sp-field label { font-size: 11px; color: #a6adc8; }
+.sp-field input,
+.sp-field select {
+  background: #2a2a3d;
+  border: 1px solid #45475a;
+  border-radius: 5px;
+  color: #cdd6f4;
+  padding: 5px 8px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color .15s;
+}
+.sp-field input:focus,
+.sp-field select:focus { border-color: #89b4fa; }
+.sp-field input[type="range"] { padding: 0; background: transparent; border: none; cursor: pointer; }
+
+.sp-row { display: flex; gap: 6px; align-items: center; }
+.sp-row input { flex: 1; }
+.sp-row button {
+  background: #313244; border: 1px solid #45475a; border-radius: 5px;
+  color: #cdd6f4; cursor: pointer; padding: 5px 10px; font-size: 13px; height: 30px;
+}
+.sp-row button:hover { background: #45475a; }
+
+.sp-device-select {
+  width: 100%; background: #313244; color: #cdd6f4;
+  border: 1px solid #45475a; border-radius: 5px; padding: 3px; font-size: 11px;
+  margin-top: 2px;
+}
+
+.sp-toggle { display: flex; align-items: center; gap: 8px; }
+.sp-toggle input[type="checkbox"] { width: 15px; height: 15px; accent-color: #89b4fa; cursor: pointer; }
+.sp-toggle label { font-size: 12px; color: #cdd6f4; cursor: pointer; }
+
+.sp-footer {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 14px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  background: rgba(0,0,0,0.25);
+  flex-shrink: 0;
+}
+#sp-save-status {
+  font-size: 11px; color: #a6e3a1; margin-right: auto;
+  opacity: 0; transition: opacity .3s;
+}
+#sp-save-status.visible { opacity: 1; }
+.sp-btn-primary {
+  background: #89b4fa; color: #1e1e2e; font-weight: 600;
+  border: none; border-radius: 5px; padding: 5px 16px;
+  font-size: 12px; cursor: pointer;
+}
+.sp-btn-primary:hover { background: #74c7ec; }
+

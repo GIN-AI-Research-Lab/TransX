@@ -20,9 +20,14 @@ const fs    = require('fs');
 const path  = require('path');
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const MODEL_REPO = 'Xenova/nllb-200-distilled-600M';
+// Support: node download-nllb-model.js --model 200M   (downloads faster 200M model)
+//          node download-nllb-model.js                (downloads default 600M model)
+const use200M    = process.argv.includes('--model') && process.argv[process.argv.indexOf('--model') + 1] === '200M'
+                || process.argv.includes('--model=200M');
+const MODEL_SIZE = use200M ? '200M' : '600M';
+const MODEL_REPO = `Xenova/nllb-200-distilled-${MODEL_SIZE}`;
 const HF_BASE    = `https://huggingface.co/${MODEL_REPO}/resolve/main`;
-const OUT_DIR    = path.join(__dirname, '..', 'nllb-models', 'nllb-200-distilled-600M');
+const OUT_DIR    = path.join(__dirname, '..', 'nllb-models', `nllb-200-distilled-${MODEL_SIZE}`);
 
 // Files to download (quantized ONNX + tokenizer assets)
 const FILES = [
@@ -103,10 +108,11 @@ function downloadFile(srcUrl, destPath) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('╔══════════════════════════════════════════╗');
-  console.log('║   NLLB-200 Model Downloader              ║');
-  console.log('║   facebook/nllb-200-distilled-600M       ║');
+  console.log(`║   NLLB-200 Model Downloader              ║`);
+  console.log(`║   ${MODEL_REPO.padEnd(40)}║`);
   console.log('╚══════════════════════════════════════════╝');
-  console.log(`\nOutput: ${OUT_DIR}\n`);
+  console.log(`\nModel: ${MODEL_REPO}`);
+  console.log(`Output: ${OUT_DIR}\n`);
 
   for (const file of FILES) {
     const dest = path.join(OUT_DIR, file);

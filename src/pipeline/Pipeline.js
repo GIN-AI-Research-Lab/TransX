@@ -30,7 +30,41 @@ function fmtTime(ms) {
 }
 
 const CONTEXT_WINDOW = 5; // số câu giữ lại làm ngữ cảnh
-const BLANK_PATTERN  = /^\s*\[[\w\s]+\]\s*$|^\s*\([\w\s]+\)\s*$/i;
+// Match bất kỳ chuỗi nằm trong [...] hoặc (...) — bao gồm cả Unicode/tiếng Nhật
+const BLANK_PATTERN  = /^\s*\[[^\[\]]+\]\s*$|^\s*\([^()]+\)\s*$/;
+
+// Whisper hallucination phrases — produced when audio has no real speech
+// (music, silence, noise). Expand this list as needed.
+const HALLUCINATION_EXACT = new Set([
+  // Japanese
+  '音楽', '(音楽)', '[音楽]', '字幕', 'ご視聴ありがとうございました', 'ご覧ありがとうございました',
+  'ご視聴ありがとうございました。', '字幕制作', '反調',
+  // English
+  'thank you for watching', 'thanks for watching', 'subtitles by', '[music]', '[ music ]',
+  '(music)', '[applause]', '(applause)', '[laughter]', '(laughter)',
+  '[silence]', '(silence)', '[noise]', '', ' ',
+]);
+
+// Minimum meaningful character count (short = likely hallucination)
+const MIN_CHARS = 2;
+
+function _isNoise(text) {
+  const t = text.trim();
+  if (!t || t.length < MIN_CHARS) return true;
+  if (BLANK_PATTERN.test(t)) return true;
+  if (HALLUCINATION_EXACT.has(t.toLowerCase()) || HALLUCINATION_EXACT.has(t)) return true;
+  return false;
+}
+
+// Map sourceLanguage display name → Whisper ISO language code
+const WHISPER_LANG = {
+  'English':    'en',
+  'Japanese':   'ja',
+  'Vietnamese': 'vi',
+};
+function _srcToWhisperLang(src) {
+  return WHISPER_LANG[src] || 'auto';
+}
 
 class Pipeline extends EventEmitter {
   constructor(cfg = {}) {
@@ -42,7 +76,7 @@ class Pipeline extends EventEmitter {
       silenceMs:  cfg.silenceMs  || 900,
       silenceRMS: cfg.silenceRMS || 280,
     });
-    this.whisper    = new WhisperClient(cfg);
+    this.whisper    = new WhisperClient({ ...cfg, whisperLanguage: _srcToWhisperLang(cfg.sourceLanguage) });
     this.translator = new NLLBTranslator(cfg);
 
     this.isRunning    = false;
@@ -53,7 +87,9 @@ class Pipeline extends EventEmitter {
     this._whisperBusy = false;   // guard against concurrent Whisper calls
     this._startTime   = null;
     this._segId       = 0;
+    this._epoch       = 0;       // tăng mỗi lần stop() — discard kết quả cũ
     this._context     = [];
+    this._recentTexts = [];      // dedup: last N complete transcripts
   }
 
   // ── Start / Stop ──────────────────────────────────────────────────
@@ -91,12 +127,16 @@ class Pipeline extends EventEmitter {
 
   stop() {
     if (!this.isRunning) return;
+    // Tăng epoch — mọi STT/translation đang chờ sẽ bị discard khi hoàn thành
+    this._epoch++;
+    // Dừng audio input ngay
     this.abuf.reset();
     this.abuf.removeAllListeners('chunk');
     this.abuf.removeAllListeners('partial');
+    // Xóa toàn bộ hàng đợi: cả audio chưa STT lẫn transcript chưa dịch
     this._queue      = [];
     this._transQueue = [];
-    this._context    = [];
+    this._recentTexts = [];
     this.isRunning = false;
     this.emit('stopped');
   }
@@ -114,7 +154,7 @@ class Pipeline extends EventEmitter {
   // ── Config hot-swap (while stopped) ──────────────────────────────
   updateConfig(cfg) {
     this.cfg        = cfg;
-    this.whisper    = new WhisperClient(cfg);
+    this.whisper    = new WhisperClient({ ...cfg, whisperLanguage: _srcToWhisperLang(cfg.sourceLanguage) });
     this.translator = new NLLBTranslator(cfg);
     this.abuf       = new AudioBuffer({
       sampleRate: cfg.sampleRate || 16000,
@@ -124,6 +164,12 @@ class Pipeline extends EventEmitter {
     });
   }
 
+  // ── Language hot-swap (while running) ───────────────────────
+  updateLanguages(cfg) {
+    this.whisper.language = _srcToWhisperLang(cfg.sourceLanguage);
+    this.translator.updateLanguage(cfg);
+  }
+
   // ── Internal: partial audio preview ─────────────────────────────
   async _handlePartial(buf, timestamp) {
     // Skip if Whisper is currently busy — avoid flooding the server
@@ -131,7 +177,7 @@ class Pipeline extends EventEmitter {
     this._whisperBusy = true;
     try {
       const text = await this.whisper.transcribe(buf);
-      if (text && !BLANK_PATTERN.test(text.trim())) {
+      if (text && !_isNoise(text.trim())) {
         this.emit('partial-transcript', { text: text.trim(), timestamp });
       }
     } catch {
@@ -158,6 +204,7 @@ class Pipeline extends EventEmitter {
   }
 
   async _doSTT({ buf, timestamp }) {
+    const epoch = this._epoch;
     this._whisperBusy = true;
     this.emit('processing', { stage: 'stt' });
     let transcript = '';
@@ -169,9 +216,18 @@ class Pipeline extends EventEmitter {
     }
     this._whisperBusy = false;
 
-    if (!transcript || BLANK_PATTERN.test(transcript.trim())) return;
+    // Bỏ qua nếu stop() đã được gọi trong lúc chờ Whisper
+    if (this._epoch !== epoch) return;
+
+    if (!transcript || _isNoise(transcript.trim())) return;
 
     transcript = transcript.trim();
+
+    // Repetition dedup: reject if same text appeared in last 3 chunks
+    if (this._recentTexts.includes(transcript)) return;
+    this._recentTexts.push(transcript);
+    if (this._recentTexts.length > 3) this._recentTexts.shift();
+
     const id = ++this._segId;
     this.emit('transcript', { text: transcript, timestamp, id });
 
@@ -182,7 +238,7 @@ class Pipeline extends EventEmitter {
     }
 
     // Enqueue translation — runs in background (don't await)
-    this._transQueue.push({ transcript, timestamp, id });
+    this._transQueue.push({ transcript, timestamp, id, epoch: this._epoch });
     this._drainTranslation();
   }
 
@@ -191,17 +247,18 @@ class Pipeline extends EventEmitter {
     if (this._transBusy) return;
     this._transBusy = true;
     while (this._transQueue.length > 0) {
-      const item = this._transQueue.shift();
-      try {
-        await this._doTranslation(item);
-      } catch (err) {
-        this.emit('error', err);
-      }
+      // Lấy tất cả câu đang chờ và dispatch đồng thời — worker pool sẽ xử lý song song
+      const batch = this._transQueue.splice(0);
+      await Promise.all(
+        batch.map(item => this._doTranslation(item).catch(err => this.emit('error', err)))
+      );
     }
     this._transBusy = false;
   }
 
-  async _doTranslation({ transcript, timestamp, id }) {
+  async _doTranslation({ transcript, timestamp, id, epoch }) {
+    // Bỏ qua nếu stop() đã được gọi trước khi translation hoàn thành
+    if (this._epoch !== epoch) return;
     this.emit('processing', { stage: 'translation' });
     let translated = '';
     try {
@@ -209,6 +266,7 @@ class Pipeline extends EventEmitter {
     } catch (err) {
       throw new Error(`Translation failed: ${err.message}`);
     }
+    if (this._epoch !== epoch) return;  // check lần 2: stop() trong lúc dịch
     if (translated) {
       this._addContext(transcript, translated);
       this.emit('translation', { original: transcript, translated, timestamp, id });

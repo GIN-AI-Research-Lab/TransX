@@ -47,7 +47,6 @@ function loadForm(c) {
   formSet('audioSource',        c.audioSource);
   formSet('audioInputDevice',   c.audioInputDevice);
   formSet('audioOutputDevice',  c.audioOutputDevice);
-  formSet('whisperLanguage',    c.whisperLanguage);
   formSet('sourceLanguage',     c.sourceLanguage);
   formSet('targetLanguage',     c.targetLanguage);
   formSet('overlayFontSize',    c.overlayFontSize);
@@ -70,7 +69,6 @@ function readForm() {
     audioSource:        gv('audioSource'),
     audioInputDevice:   gv('audioInputDevice').trim(),
     audioOutputDevice:  gv('audioOutputDevice').trim(),
-    whisperLanguage:    gv('whisperLanguage'),
     sourceLanguage:     gv('sourceLanguage'),
     targetLanguage:     gv('targetLanguage').trim(),
     overlayFontSize:    gi('overlayFontSize'),

@@ -23,12 +23,11 @@ const defaults = {
 
   // ── Whisper STT ───────────────────────────────────────────────────
   whisperEndpoint:   'http://127.0.0.1:8080',  // dùng IP trực tiếp, tránh Node.js resolve localhost → IPv6
-  whisperLanguage:   'auto',         // ISO code or 'auto'
   whisperTimeout:    30000,
 
   // ── Translation ─────────────────────────────────────────────────
   translateEnabled:  true,
-  sourceLanguage:    'auto',         // display name or 'auto' (defaults to English for NLLB)
+  sourceLanguage:    'English',      // 'English' | 'Japanese' | 'Vietnamese'
   targetLanguage:    'Vietnamese',
 
   // ── TTS ───────────────────────────────────────────────────────────

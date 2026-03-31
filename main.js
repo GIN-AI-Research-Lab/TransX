@@ -214,9 +214,9 @@ function setupIPC() {
     }
     // Rebuild pipeline với settings mới (nếu đang dừng)
     if (pipeline && !pipeline.isRunning) buildPipeline();
-    // Nếu đang chạy: cập nhật ngôn ngữ dịch ngay lập tức (hot-swap)
-    if (pipeline && pipeline.isRunning && pipeline.translator) {
-      pipeline.translator.updateLanguage(cfg);
+    // Nếu đang chạy: cập nhật ngôn ngữ ngay lập tức (hot-swap)
+    if (pipeline && pipeline.isRunning) {
+      pipeline.updateLanguages(cfg);
     }
     return cfg;
   });

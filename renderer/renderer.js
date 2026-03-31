@@ -38,7 +38,19 @@ let segments     = [];           // [{ id, el, transEl }] các segment đã hi�
 let _liveEl      = null;         // segment đang ghi live (typing)
 let _liveOrigEl  = null;         // .seg-orig trong live segment
 const _pendingTrans = new Map(); // id → transEl — đang chờ dịch
-const MAX_SEG    = 6;
+const MAX_SEG    = 200;          // giữ tối đa 200 segment trong DOM
+
+// Auto-scroll chỉ khi user đang ở cuối (không kéo xuống khi đang scroll lên xem lại)
+function _isAtBottom() {
+  return segContainer.scrollHeight - segContainer.scrollTop - segContainer.clientHeight < 80;
+}
+function _scrollToBottom() {
+  // Dùng rAF để scroll sau khi DOM đã re-layout (đặc biệt khi text dịch cập nhật in-place)
+  const atBottom = _isAtBottom();
+  requestAnimationFrame(() => {
+    if (atBottom) segContainer.scrollTop = segContainer.scrollHeight;
+  });
+}
 
 // ── UI helpers ────────────────────────────────────────────────────────────
 function setRunning(r) {
@@ -55,8 +67,6 @@ function setRunning(r) {
     pendingSegEl.classList.add('hidden');
     statusMsg.textContent = 'Đang nghe…';
   } else {
-    // Remove stray live segment if pipeline stopped mid-word
-    if (_liveEl) { _liveEl.remove(); _liveEl = null; _liveOrigEl = null; }
     statusMsg.textContent = 'Nhấn ▶ để bắt đầu';
   }
 }
@@ -115,7 +125,7 @@ function addSegment({ id, timestamp, original, translated, pending = false }) {
   const transEl = el.querySelector('.seg-trans');
   segments.push({ id, el, transEl });
   while (segments.length > MAX_SEG) segments.shift().el.remove();
-  segContainer.scrollTop = segContainer.scrollHeight;
+  _scrollToBottom();
   return transEl;
 }
 
@@ -184,7 +194,7 @@ btnClear.addEventListener('click', () => {
   pendingSegEl.classList.add('hidden');
 });
 
-btnSettings.addEventListener('click', () => ipc.invoke('settings:open'));
+btnSettings.addEventListener('click', toggleSettingsPanel);
 
 btnPass.addEventListener('click', async () => {
   clickThrough = !clickThrough;
@@ -199,6 +209,8 @@ btnHide.addEventListener('click', () => window.close());
 ipc.on('pipeline:status', (d) => {
   if (!d.running) {
     stopAudioCapture();
+    // Xóa live segment chưa hoàn chỉnh (audio chưa qua Whisper)
+    if (_liveEl) { _liveEl.remove(); _liveEl = null; _liveOrigEl = null; }
   }
   setRunning(d.running);
 });
@@ -222,7 +234,7 @@ ipc.on('pipeline:partial-transcript', ({ text, timestamp }) => {
     while (segments.length >= MAX_SEG) segments.shift().el.remove();
   }
   _liveOrigEl.innerHTML = escHtml(text) + '<span class="typing-cursor"> ▌</span>';
-  segContainer.scrollTop = segContainer.scrollHeight;
+  _scrollToBottom();
 });
 
 // pipeline:transcript — chốt live segment thành pending dịch
@@ -255,6 +267,7 @@ ipc.on('pipeline:translation', ({ original, translated, timestamp, id }) => {
       : '<em style="opacity:.35">—</em>';
     transEl.closest('.segment')?.classList.remove('segment--pending');
     _pendingTrans.delete(id);
+    _scrollToBottom();
   } else {
     // Fallback: không tìm thấy segment theo id
     addSegment({ id, timestamp, original, translated });
@@ -263,6 +276,113 @@ ipc.on('pipeline:translation', ({ original, translated, timestamp, id }) => {
 });
 
 ipc.on('pipeline:error', (msg) => showError(msg));
+
+// ── Settings panel (inline dropdown) ────────────────────────────────────────
+const settingsPanel = $('settings-panel');
+
+// Bind range inputs → live value display
+['sp-overlayFontSize','sp-overlayOpacity','sp-chunkMaxMs','sp-silenceMs','sp-silenceRMS']
+  .forEach(id => {
+    const el  = document.getElementById(id);
+    const val = document.getElementById(`${id}-val`);
+    if (el && val) el.addEventListener('input', () => { val.textContent = el.value; });
+  });
+
+function spFormSet(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (el.type === 'checkbox') { el.checked = !!value; return; }
+  el.value = value ?? '';
+  const valSpan = document.getElementById(`${id}-val`);
+  if (valSpan) valSpan.textContent = value;
+}
+
+async function spLoad() {
+  const c = await ipc.invoke('config:get');
+  spFormSet('sp-audioSource',      c.audioSource      ?? 'microphone');
+  spFormSet('sp-audioInputDevice', c.audioInputDevice ?? '');
+  spFormSet('sp-sourceLanguage',   c.sourceLanguage   ?? 'English');
+  spFormSet('sp-targetLanguage',   c.targetLanguage   ?? 'Vietnamese');
+  spFormSet('sp-overlayFontSize',  c.overlayFontSize  ?? 16);
+  spFormSet('sp-overlayOpacity',   c.overlayOpacity   ?? 1.0);
+  spFormSet('sp-hotkey',           c.hotkey           ?? '');
+  spFormSet('sp-startMinimized',   c.startMinimized   ?? false);
+  spFormSet('sp-chunkMaxMs',       c.chunkMaxMs       ?? 10000);
+  spFormSet('sp-silenceMs',        c.silenceMs        ?? 1200);
+  spFormSet('sp-silenceRMS',       c.silenceRMS        ?? 250);
+}
+
+function spRead() {
+  const gv  = (id) => { const el = document.getElementById(id); return el ? el.value : undefined; };
+  const gch = (id) => { const el = document.getElementById(id); return !!el && el.checked; };
+  return {
+    audioSource:      gv('sp-audioSource'),
+    audioInputDevice: (gv('sp-audioInputDevice') || '').trim(),
+    sourceLanguage:   gv('sp-sourceLanguage'),
+    targetLanguage:   gv('sp-targetLanguage'),
+    overlayFontSize:  parseInt(gv('sp-overlayFontSize'), 10),
+    overlayOpacity:   parseFloat(gv('sp-overlayOpacity')),
+    hotkey:           (gv('sp-hotkey') || '').trim(),
+    startMinimized:   gch('sp-startMinimized'),
+    chunkMaxMs:       parseInt(gv('sp-chunkMaxMs'), 10),
+    silenceMs:        parseInt(gv('sp-silenceMs'), 10),
+    silenceRMS:       parseInt(gv('sp-silenceRMS'), 10),
+  };
+}
+
+let _spOpen = false;
+function toggleSettingsPanel() {
+  _spOpen = !_spOpen;
+  settingsPanel.classList.toggle('hidden', !_spOpen);
+  btnSettings.classList.toggle('cbtn--active', _spOpen);
+  if (_spOpen) spLoad();
+}
+
+// Close panel when clicking outside of it
+document.addEventListener('click', (e) => {
+  if (_spOpen && !settingsPanel.contains(e.target) && e.target !== btnSettings) {
+    _spOpen = false;
+    settingsPanel.classList.add('hidden');
+    btnSettings.classList.remove('cbtn--active');
+  }
+});
+
+$('sp-btn-save').addEventListener('click', async () => {
+  await ipc.invoke('config:save', spRead());
+  const st = $('sp-save-status');
+  st.classList.add('visible');
+  setTimeout(() => st.classList.remove('visible'), 2000);
+});
+
+$('sp-btn-list-capture').addEventListener('click', async () => {
+  const sel = $('sp-capture-select');
+  const wasHidden = sel.classList.contains('hidden');
+  sel.classList.toggle('hidden');
+  if (wasHidden) {
+    sel.innerHTML = '<option disabled>Đang lấy danh sách…</option>';
+    try {
+      let devices = await navigator.mediaDevices.enumerateDevices();
+      if (devices.filter(d => d.kind === 'audioinput').every(d => !d.label)) {
+        const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+        tmp.getTracks().forEach(t => t.stop());
+        devices = await navigator.mediaDevices.enumerateDevices();
+      }
+      const inputs = devices.filter(d => d.kind === 'audioinput');
+      sel.innerHTML = inputs.length
+        ? inputs.map(d => `<option value="${escHtml(d.label)}">${escHtml(d.label || `Mic (${d.deviceId.slice(0,8)}…)`)}</option>`).join('')
+        : '<option disabled>Không tìm thấy mic nào</option>';
+      const cur = $('sp-audioInputDevice').value;
+      const match = Array.from(sel.options).find(o => o.value === cur);
+      if (match) sel.value = cur;
+    } catch (e) {
+      sel.innerHTML = `<option disabled>Lỗi: ${escHtml(e.message)}</option>`;
+    }
+  }
+});
+
+$('sp-capture-select').addEventListener('change', () => {
+  $('sp-audioInputDevice').value = $('sp-capture-select').value;
+});
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────
 (async () => {

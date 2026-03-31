@@ -1,24 +1,23 @@
 /**
  * src/ai/NLLBTranslator.js
  *
- * In-process translation using NLLB-200 distilled 600M (quantized ONNX).
- * Uses @xenova/transformers — no Ollama, no external service, no internet at runtime.
+ * Wraps a Worker Thread that runs NLLB-200 ONNX inference.
+ * The heavy ONNX work runs in nllb-worker.js so the Electron main
+ * thread (Node.js event loop) is never blocked.
  *
  * Model files must exist at: <root>/nllb-models/nllb-200-distilled-600M/
  * Run `npm run download-model` once to populate the model files.
- *
- * Drop-in replacement for TranslatorClient — same .translate() signature.
  */
 
 'use strict';
 
-const path = require('path');
-const fs   = require('fs');
+const path             = require('path');
+const fs               = require('fs');
+const { Worker }       = require('worker_threads');
 
 // ── NLLB-200 flores+ language codes ──────────────────────────────────────────
-// Maps display names (used in config) → NLLB flores+ BCP-47 codes
 const LANG_CODE = {
-  'auto':       'eng_Latn',  // default when source language is unknown
+  'auto':       'eng_Latn',
   'English':    'eng_Latn',
   'Vietnamese': 'vie_Latn',
   'Chinese':    'zho_Hans',
@@ -43,106 +42,120 @@ function toLangCode(name) {
   if (!name || name === 'auto') return 'eng_Latn';
   const code = LANG_CODE[name];
   if (code) return code;
-  // Accept raw flores+ codes (e.g. 'vie_Latn')
   if (/^[a-z]{3}_[A-Z][a-z]{3}$/.test(name)) return name;
   return 'eng_Latn';
 }
 
-// ── Singleton pipeline (shared across all NLLBTranslator instances) ───────────
-let _pipe        = null;
-let _pipePromise = null;
+// ── Worker Pool (2 workers, round-robin) ─────────────────────────────────────
+const POOL_SIZE   = 2;
+const WORKER_PATH = path.join(__dirname, 'nllb-worker.js');
 
-/**
- * Lazily initialise (and cache) the @xenova/transformers translation pipeline.
- * @param {string} modelDir  Absolute path that contains nllb-200-distilled-600M/
- * @returns {Promise<object>}
- */
-async function loadPipeline(modelDir) {
-  if (_pipe) return _pipe;
-  if (_pipePromise) return _pipePromise;
+// Model preference order: fastest first
+const MODELS_BY_SPEED = [
+  'nllb-200-distilled-200M',  // ~3x faster than 600M, prefer when available
+  'nllb-200-distilled-600M',  // fallback
+];
 
-  _pipePromise = (async () => {
-    // @xenova/transformers là ES Module — phải dùng dynamic import(), không dùng require()
-    // sharp đã được chặn bằng Module._load hook ở đầu main.js
-    const { pipeline, env } = await import('@xenova/transformers');
+function _pickModel(modelDir) {
+  for (const name of MODELS_BY_SPEED) {
+    if (fs.existsSync(path.join(modelDir, name, 'config.json'))) return name;
+  }
+  return MODELS_BY_SPEED[MODELS_BY_SPEED.length - 1];
+}
 
-    // Point library to local model directory — disable any remote fetching
-    env.localModelPath    = modelDir;
-    env.allowRemoteModels = false;
-    env.useBrowserCache   = false;
+let _pool        = [];   // [{ worker, pending: Map<id,{resolve,reject}> }]
+let _rr          = 0;    // round-robin counter
+let _nextId      = 0;    // monotonic message id
+let _poolPromise = null; // singleton init promise
 
-    console.log('[nllb] Loading model from:', path.join(modelDir, 'nllb-200-distilled-600M'));
+function _getPool(modelDir) {
+  if (_poolPromise) return _poolPromise;
 
-    const pipe = await pipeline('translation', 'nllb-200-distilled-600M', {
-      quantized: true,
-    });
+  const modelName = _pickModel(modelDir);
+  console.log(`[nllb] Using model: ${modelName}`);
 
-    _pipe = pipe;
-    console.log('[nllb] Model ready.');
-    return _pipe;
-  })();
+  _poolPromise = Promise.all(
+    Array.from({ length: POOL_SIZE }, (_, i) =>
+      new Promise((resolve, reject) => {
+        const entry = { worker: null, pending: new Map() };
+        const w = new Worker(WORKER_PATH, { workerData: { modelDir, modelName } });
 
-  // If init fails, allow retry next call
-  _pipePromise.catch(() => { _pipePromise = null; });
+        w.on('message', (msg) => {
+          if (msg.type === 'ready') {
+            entry.worker = w;
+            resolve(entry);
+            return;
+          }
+          if (msg.type === 'init-error') {
+            reject(new Error(msg.message));
+            return;
+          }
+          if (msg.type === 'result' || msg.type === 'error') {
+            const cb = entry.pending.get(msg.id);
+            if (!cb) return;
+            entry.pending.delete(msg.id);
+            if (msg.type === 'error') cb.reject(new Error(msg.message));
+            else cb.resolve(msg.text);
+          }
+        });
 
-  return _pipePromise;
+        w.on('error', (err) => {
+          for (const [, cb] of entry.pending) cb.reject(err);
+          entry.pending.clear();
+          reject(err);
+        });
+
+        w.on('exit', (code) => {
+          if (code !== 0) console.error(`[nllb-worker-${i}] Exited with code ${code}`);
+        });
+      })
+    )
+  ).then((entries) => {
+    _pool = entries;
+    console.log(`[nllb] Worker pool ready (${POOL_SIZE} workers).`);
+  });
+
+  _poolPromise.catch(() => {
+    _poolPromise = null;
+    _pool        = [];
+  });
+
+  return _poolPromise;
 }
 
 // ── NLLBTranslator ────────────────────────────────────────────────────────────
 class NLLBTranslator {
-  /**
-   * @param {object} cfg
-   * @param {string} [cfg.sourceLanguage]  display name or 'auto'  (default 'auto' → English)
-   * @param {string} [cfg.targetLanguage]  display name             (default 'Vietnamese')
-   */
   constructor(cfg = {}) {
     this.srcCode = toLangCode(cfg.sourceLanguage || 'auto');
     this.tgtCode = toLangCode(cfg.targetLanguage || 'Vietnamese');
 
-    // Resolve model root directory (works in both dev and packaged builds)
     const { app } = require('electron');
     const appRoot = app.isPackaged
       ? process.resourcesPath
       : path.join(__dirname, '..', '..');
 
-    this._modelDir  = path.join(appRoot, 'nllb-models');
-    this._modelPath = path.join(this._modelDir, 'nllb-200-distilled-600M');
+    this._modelDir = path.join(appRoot, 'nllb-models');
 
-    // Begin loading eagerly so first translation has less latency
-    this._ready = loadPipeline(this._modelDir);
+    // Start workers eagerly to reduce first-translation latency
+    this._ready = _getPool(this._modelDir);
   }
 
-  /**
-   * Translate a single sentence with NLLB-200.
-   * Signature matches TranslatorClient.translate() for drop-in compatibility.
-   *
-   * @param {string}   text
-   * @param {Array}    [context]   ignored — NLLB is a dedicated translation model
-   * @param {Function} [onPartial] ignored — NLLB generates the full output in one pass
-   * @returns {Promise<string>}
-   */
-  async translate(text, context = [], onPartial = null) {
+  async translate(text) {
     const t = text.trim();
     if (!t) return '';
-
-    // Skip Whisper noise/hallucination labels like [BLANK_AUDIO], (music), etc.
     if (/^\s*[\[(][\w\s_]+[\])]\s*$/i.test(t)) return '';
 
-    const pipe = await this._ready;
-    const out  = await pipe(t, {
-      src_lang:       this.srcCode,
-      tgt_lang:       this.tgtCode,
-      max_new_tokens: 256,
-    });
+    await this._ready; // chờ pool sẵn sàng
+    const id = ++_nextId;
+    // Round-robin: phân phối đều cho 2 worker
+    const entry = _pool[_rr++ % _pool.length];
 
-    return out?.[0]?.translation_text?.trim() ?? '';
+    return new Promise((resolve, reject) => {
+      entry.pending.set(id, { resolve, reject });
+      entry.worker.postMessage({ type: 'translate', id, text: t, srcCode: this.srcCode, tgtCode: this.tgtCode });
+    });
   }
 
-  /**
-   * Cập nhật ngôn ngữ ngườn/đích ngay cả khi đang dịch (hot-swap).
-   * Pipeline sử dụng được khi config thay đổi lúc đang running.
-   * @param {object} cfg
-   */
   updateLanguage(cfg) {
     this.srcCode = toLangCode(cfg.sourceLanguage || 'auto');
     this.tgtCode = toLangCode(cfg.targetLanguage || 'Vietnamese');
@@ -150,28 +163,19 @@ class NLLBTranslator {
 
   // ── Static helpers ────────────────────────────────────────────────────────
 
-  /**
-   * Kiểm tra các file model NLLB tối thiểu có tồn tại trên disk chưa.
-   * @param {string} modelDir  Đường dẫn tuyệt đối đến thư mục nllb-models/
-   * @returns {boolean}
-   */
   static modelExists(modelDir) {
-    const required = [
-      path.join(modelDir, 'nllb-200-distilled-600M', 'config.json'),
-      path.join(modelDir, 'nllb-200-distilled-600M', 'onnx', 'encoder_model_quantized.onnx'),
-      path.join(modelDir, 'nllb-200-distilled-600M', 'onnx', 'decoder_model_merged_quantized.onnx'),
-    ];
-    return required.every(f => fs.existsSync(f));
+    return MODELS_BY_SPEED.some(name => {
+      const base = path.join(modelDir, name);
+      return fs.existsSync(path.join(base, 'config.json')) &&
+             fs.existsSync(path.join(base, 'onnx', 'encoder_model_quantized.onnx')) &&
+             fs.existsSync(path.join(base, 'onnx', 'decoder_model_merged_quantized.onnx'));
+    });
   }
 
-  /**
-   * Pre-warm the pipeline (start loading in background without blocking).
-   * Call at app startup to reduce first-translation latency.
-   * @param {string} modelDir
-   */
   static prewarm(modelDir) {
-    loadPipeline(modelDir).catch(e => console.warn('[nllb] prewarm error:', e.message));
+    _getPool(modelDir).catch(e => console.warn('[nllb] prewarm error:', e.message));
   }
 }
 
 module.exports = NLLBTranslator;
+

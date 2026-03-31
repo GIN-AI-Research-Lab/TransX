@@ -26,6 +26,101 @@
       </div>
     </div>
 
+    <!-- ── Settings dropdown panel ───────────────────────────────── -->
+    <div id="settings-panel" class="hidden">
+      <div class="sp-body">
+
+        <details class="sp-section" open>
+          <summary class="sp-section-title">🎤 Audio</summary>
+          <div class="sp-section-body">
+            <div class="sp-field">
+              <label for="sp-audioSource">Source</label>
+              <select id="sp-audioSource">
+                <option value="microphone">Microphone (WASAPI)</option>
+                <option value="system">System Audio / Loopback</option>
+                <option value="both">Both — Mic + System</option>
+              </select>
+            </div>
+            <div class="sp-field">
+              <label for="sp-audioInputDevice">Microphone</label>
+              <div class="sp-row">
+                <input id="sp-audioInputDevice" type="text" placeholder="Để trống = mặc định">
+                <button id="sp-btn-list-capture" title="Chọn từ danh sách">▾</button>
+              </div>
+              <select id="sp-capture-select" class="sp-device-select hidden" size="4"></select>
+            </div>
+          </div>
+        </details>
+
+        <details class="sp-section" open>
+          <summary class="sp-section-title">🌐 Dịch thuật</summary>
+          <div class="sp-section-body">
+            <div class="sp-field">
+              <label for="sp-sourceLanguage">Ngôn ngữ nguồn</label>
+              <select id="sp-sourceLanguage">
+                <option value="English">English</option>
+                <option value="Japanese">Japanese — 日本語</option>
+                <option value="Vietnamese">Vietnamese — Tiếng Việt</option>
+              </select>
+            </div>
+            <div class="sp-field">
+              <label for="sp-targetLanguage">Ngôn ngữ đích</label>
+              <select id="sp-targetLanguage">
+                <option value="Vietnamese">Vietnamese — Tiếng Việt</option>
+                <option value="English">English</option>
+                <option value="Japanese">Japanese — 日本語</option>
+              </select>
+            </div>
+          </div>
+        </details>
+
+        <details class="sp-section">
+          <summary class="sp-section-title">🖥 Overlay</summary>
+          <div class="sp-section-body">
+            <div class="sp-field">
+              <label>Font size — <span id="sp-overlayFontSize-val">16</span>px</label>
+              <input type="range" id="sp-overlayFontSize" min="10" max="28" step="1" value="16">
+            </div>
+            <div class="sp-field">
+              <label>Opacity — <span id="sp-overlayOpacity-val">1.0</span></label>
+              <input type="range" id="sp-overlayOpacity" min="0.2" max="1.0" step="0.05" value="1.0">
+            </div>
+          </div>
+        </details>
+
+        <details class="sp-section">
+          <summary class="sp-section-title">⚙ Ứng dụng</summary>
+          <div class="sp-section-body">
+            <div class="sp-field">
+              <label for="sp-hotkey">Hotkey</label>
+              <input id="sp-hotkey" type="text" placeholder="Ctrl+Shift+T">
+            </div>
+            <div class="sp-toggle">
+              <input type="checkbox" id="sp-startMinimized">
+              <label for="sp-startMinimized">Start minimized</label>
+            </div>
+            <div class="sp-field">
+              <label>Max chunk — <span id="sp-chunkMaxMs-val">10000</span>ms</label>
+              <input type="range" id="sp-chunkMaxMs" min="2000" max="20000" step="500" value="10000">
+            </div>
+            <div class="sp-field">
+              <label>Silence flush — <span id="sp-silenceMs-val">1200</span>ms</label>
+              <input type="range" id="sp-silenceMs" min="300" max="3000" step="100" value="1200">
+            </div>
+            <div class="sp-field">
+              <label>Silence RMS — <span id="sp-silenceRMS-val">250</span></label>
+              <input type="range" id="sp-silenceRMS" min="50" max="800" step="10" value="250">
+            </div>
+          </div>
+        </details>
+
+      </div>
+      <div class="sp-footer">
+        <span id="sp-save-status">✓ Saved</span>
+        <button id="sp-btn-save" class="sp-btn-primary">Save &amp; Apply</button>
+      </div>
+    </div>
+
     <!-- ── Segment list ──────────────────────────────────────────────────── -->
     <div id="content">
       <div id="segments-container"></div>
