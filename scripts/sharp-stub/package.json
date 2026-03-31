@@ -1,0 +1,6 @@
+{
+  "name": "sharp-stub",
+  "version": "0.0.1",
+  "description": "No-op stub — sharp không cần thiết cho text translation",
+  "main": "index.js"
+}

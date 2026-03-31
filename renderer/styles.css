@@ -1,0 +1,179 @@
+/* ── Reset ───────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: transparent;
+  overflow: hidden;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ── Root container ──────────────────────────────────────────────────── */
+#app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 8, 12, 0.84);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* ── Title bar ───────────────────────────────────────────────────────── */
+#titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+}
+
+.app-name {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: rgba(255,255,255,0.30);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  -webkit-app-region: no-drag;
+}
+
+/* Status dot */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background .25s, box-shadow .25s;
+}
+.dot--idle      { background: #444; }
+.dot--running   { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+.dot--stt       { background: #ff9800; box-shadow: 0 0 6px #ff9800; animation: blink .6s infinite; }
+.dot--translate { background: #29b6f6; box-shadow: 0 0 6px #29b6f6; animation: blink .6s infinite; }
+.dot--error     { background: #ef5350; box-shadow: 0 0 6px #ef5350; }
+
+@keyframes blink { 0%,100% { opacity:1 } 50% { opacity:.35 } }
+
+/* Control buttons */
+.cbtn {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.65);
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s, color .15s;
+  padding: 0;
+}
+.cbtn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.cbtn--active   { background: rgba(76,175,80,0.25); border-color: rgba(76,175,80,0.55); color: #66bb6a; }
+.cbtn--running  { color: #66bb6a; }
+.cbtn--clear:hover { background: rgba(239,83,80,0.25); border-color: rgba(239,83,80,0.45); color: #ef9a9a; }
+
+/* ── Content area ────────────────────────────────────────────────────── */
+#content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* ── Segment list ────────────────────────────────────────────────────── */
+#segments-container {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px 4px;
+  scrollbar-width: none;
+}
+#segments-container::-webkit-scrollbar { display: none; }
+
+.segment {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  animation: seg-in .18s ease;
+}
+
+@keyframes seg-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.seg-ts {
+  font-size: 9px;
+  color: rgba(255,255,255,0.22);
+  min-width: 26px;
+  padding-top: 4px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .3px;
+}
+
+.seg-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  padding-bottom: 5px;
+}
+
+.seg-orig {
+  font-size: 11px;
+  color: rgba(255,255,255,0.38);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.seg-trans {
+  font-size: 14px;
+  color: #81d4fa;
+  line-height: 1.5;
+  font-weight: 500;
+  word-break: break-word;
+  font-family: 'Segoe UI', 'Meiryo', 'Yu Gothic', 'Noto Sans CJK JP', system-ui, sans-serif;
+}
+
+.segment--pending .seg-ts   { color: rgba(255,152,0,0.45); }
+.segment--pending .seg-trans { color: rgba(255,152,0,0.70); font-style: italic; }
+
+/* ── Status bar ──────────────────────────────────────────────────────── */
+#statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 10px;
+  background: rgba(0,0,0,0.3);
+  border-top: 1px solid rgba(255,255,255,0.05);
+  font-size: 10px;
+  color: rgba(255,255,255,0.28);
+  flex-shrink: 0;
+}
+
+.spin {
+  display: inline-block;
+  color: #ff9800;
+  animation: rotate 1s linear infinite;
+}
+@keyframes rotate { to { transform: rotate(360deg); } }
+
+.hidden { display: none !important; }

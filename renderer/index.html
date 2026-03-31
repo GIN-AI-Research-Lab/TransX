@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>Trans Overlay</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Title bar / drag handle ───────────────────────────────── -->
+    <div id="titlebar">
+      <span class="app-name">TRANS</span>
+
+      <div class="controls">
+        <span id="dot" class="dot dot--idle" title="Status"></span>
+
+        <button id="btn-toggle"   class="cbtn" title="Start / Stop (Ctrl+Shift+T)">▶</button>
+        <button id="btn-clear"    class="cbtn cbtn--clear" title="Xóa nội dung dịch">🗑</button>
+        <button id="btn-settings" class="cbtn" title="Settings">⚙</button>
+        <button id="btn-pass"     class="cbtn cbtn--active" title="Click-through: OFF">📌</button>
+        <button id="btn-hide"     class="cbtn" title="Hide overlay">—</button>
+      </div>
+    </div>
+
+    <!-- ── Segment list ──────────────────────────────────────────────────── -->
+    <div id="content">
+      <div id="segments-container"></div>
+      <div id="pending-segment" class="segment segment--pending hidden">
+        <span class="seg-ts" id="pending-ts"></span>
+        <div class="seg-body">
+          <div class="seg-orig" id="pending-orig"></div>
+          <div class="seg-trans" id="pending-trans">⟳ Đang dịch…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Status bar ────────────────────────────────────────────── -->
+    <div id="statusbar">
+      <span id="status-msg">Ready</span>
+      <span id="spin" class="spin hidden">⟳</span>
+    </div>
+
+  </div>
+
+  <script src="audioCapture.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

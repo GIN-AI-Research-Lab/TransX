@@ -1,0 +1,70 @@
+/**
+ * preload.js — Secure contextBridge between renderer and main process.
+ * Only whitelisted channels are exposed; no raw ipcRenderer access.
+ */
+
+'use strict';
+
+const { contextBridge, ipcRenderer } = require('electron');
+
+// Channels renderer may invoke (request → response)
+const INVOKE_CHANNELS = new Set([
+  'config:get',
+  'config:save',
+  'whisper:ping',          // kiểm tra whisper server có chạy không
+  'pipeline:toggle',
+  'pipeline:status',
+  'overlay:setIgnoreMouse',
+  'audio:listDevices',
+  'audio:getSources',      // Electron desktopCapturer sources cho system audio
+  'audio:sendChunk',       // Gửi PCM Int16 từ Web Audio API → main → Whisper
+  'settings:open',
+  'setup:start-pull',      // first-run: acknowledge model missing (NLLB is pre-bundled)
+  'setup:cancel',
+]);
+
+// Channels renderer may listen to (main → renderer events)
+const LISTEN_CHANNELS = new Set([
+  'pipeline:status',
+  'pipeline:processing',
+  'pipeline:transcript',
+  'pipeline:translation',
+  'pipeline:translation:partial',
+  'pipeline:error',
+  'tts:speak',
+  'setup:progress',
+]);
+
+contextBridge.exposeInMainWorld('electron', {
+  /**
+   * Send a request to main and await a response.
+   * @param {string} channel
+   * @param {...any} args
+   * @returns {Promise<any>}
+   */
+  invoke(channel, ...args) {
+    if (!INVOKE_CHANNELS.has(channel)) {
+      return Promise.reject(new Error(`[preload] blocked invoke: ${channel}`));
+    }
+    return ipcRenderer.invoke(channel, ...args);
+  },
+
+  /**
+   * Subscribe to events pushed from main.
+   * Returns an unsubscribe function.
+   * @param {string} channel
+   * @param {Function} callback  — called with (...args), no 'event' prefix
+   * @returns {() => void}
+   */
+  on(channel, callback) {
+    if (!LISTEN_CHANNELS.has(channel)) return () => {};
+    const handler = (_event, ...args) => callback(...args);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+
+  /** Remove all listeners for a channel (useful on page unload). */
+  removeAllListeners(channel) {
+    if (LISTEN_CHANNELS.has(channel)) ipcRenderer.removeAllListeners(channel);
+  },
+});
