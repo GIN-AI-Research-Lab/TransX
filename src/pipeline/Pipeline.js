@@ -31,8 +31,6 @@ function fmtTime(ms) {
 
 const CONTEXT_WINDOW = 5; // số câu giữ lại làm ngữ cảnh
 const BLANK_PATTERN  = /^\s*\[[\w\s]+\]\s*$|^\s*\([\w\s]+\)\s*$/i;
-// Detect sentence-ending punctuation (multi-language)
-const SENTENCE_END   = /[.?!\u3002\uff01\uff1f\u0964\u2026]['")\]\u300d]*\s*$/u;
 
 class Pipeline extends EventEmitter {
   constructor(cfg = {}) {
@@ -134,14 +132,7 @@ class Pipeline extends EventEmitter {
     try {
       const text = await this.whisper.transcribe(buf);
       if (text && !BLANK_PATTERN.test(text.trim())) {
-        const trimmed = text.trim();
-        this.emit('partial-transcript', { text: trimmed, timestamp });
-        // Câu kết thúc bằng dấu câu → flush ngay, không cần đợi im lặng
-        if (SENTENCE_END.test(trimmed)) {
-          this._whisperBusy = false;
-          this.abuf.forceFlush();
-          return;
-        }
+        this.emit('partial-transcript', { text: text.trim(), timestamp });
       }
     } catch {
       // Ignore partial errors silently

@@ -107,11 +107,6 @@ class AudioBuffer extends EventEmitter {
     this._chunkStartMs = null;
   }
 
-  /** Flush ngay lập tức (dùng khi phát hiện cuối câu qua Whisper partial). */
-  forceFlush() {
-    this._flush();
-  }
-
   _clearTimer() {
     if (this._silenceTimer) {
       clearTimeout(this._silenceTimer);
