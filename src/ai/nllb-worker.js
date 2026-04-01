@@ -29,10 +29,9 @@ async function init() {
   console.log(`[nllb-worker] Loading model: ${modelName}`);
   _pipe = await pipeline('translation', modelName, {
     quantized: true,
-    // Tăng số threads cho ONNX runtime — giảm latency ~2x trên CPU đa nhân
     session_options: {
-      intra_op_num_threads: 4,  // song song trong 1 op (encoder/decoder matmul)
-      inter_op_num_threads: 1,  // 1 pipeline mỗi worker (tránh tranh chấp với worker thứ 2)
+      intra_op_num_threads: 1,
+      inter_op_num_threads: 1,
     },
   });
   console.log('[nllb-worker] Model ready.');
@@ -43,9 +42,12 @@ parentPort.on('message', async (msg) => {
   if (msg.type !== 'translate') return;
   const { id, text, srcCode, tgtCode } = msg;
   try {
-    // Scale max_new_tokens theo độ dài input, capped ở 64.
-    // Hầu hết câu nói < 15 từ → output < 20 tokens; 64 đủ cho câu dài thông thường.
-    const maxTokens = Math.min(64, Math.ceil(text.length * 1.2) + 12);
+    // Tiếng Nhật (CJK) ísă tiếng/ký tự hơn Latin: mỗi ký tự ~ 1 token, nhưng
+    // output (Việt) nhiều ký tự hơn → nhân hệ số cao hơn.
+    // Latin: 1 chữ ~0.3 token (đã sub-word) → nhân 0.5 là đủ.
+    const isJapanese = /[\u3040-\u30ff\u4e00-\u9fff]/.test(text);
+    const ratio      = isJapanese ? 3.0 : 0.5;
+    const maxTokens  = Math.min(150, Math.max(32, Math.ceil(text.length * ratio) + 16));
     const out = await _pipe(text, {
       src_lang:       srcCode,
       tgt_lang:       tgtCode,

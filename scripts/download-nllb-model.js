@@ -27,6 +27,7 @@ const use200M    = process.argv.includes('--model') && process.argv[process.argv
 const MODEL_SIZE = use200M ? '200M' : '600M';
 const MODEL_REPO = `Xenova/nllb-200-distilled-${MODEL_SIZE}`;
 const HF_BASE    = `https://huggingface.co/${MODEL_REPO}/resolve/main`;
+const MIRROR_BASE = `https://hf-mirror.com/${MODEL_REPO}/resolve/main`;
 const OUT_DIR    = path.join(__dirname, '..', 'nllb-models', `nllb-200-distilled-${MODEL_SIZE}`);
 
 // Files to download (quantized ONNX + tokenizer assets)
@@ -61,18 +62,38 @@ function downloadFile(srcUrl, destPath) {
     let downloaded = 0;
     let total      = 0;
 
-    function attempt(url) {
+    // Đọc HF_TOKEN từ env (tuỳ chọn, dùng khi bị rate-limit)
+    const hfToken = process.env.HF_TOKEN || '';
+
+    // Bắt đầu từ HuggingFace trực tiếp với User-Agent chuẩn browser
+    function attempt(url, usedToken) {
       const parsed = new URL(url);
       const mod    = parsed.protocol === 'https:' ? https : http;
+      const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
+      if (usedToken) headers['Authorization'] = `Bearer ${usedToken}`;
 
-      mod.get(url, { headers: { 'User-Agent': 'nllb-model-downloader/1.0' } }, (res) => {
-        // Follow redirects — location có thể là relative path
+      mod.get(url, { headers }, (res) => {
+        // Follow redirects
         if ([301, 302, 307, 308].includes(res.statusCode)) {
           const loc = res.headers.location;
           if (!loc) { reject(new Error(`Redirect không có location header`)); return; }
-          // Xây URL đầy đủ nếu location là relative
           const next = loc.startsWith('http') ? loc : `${parsed.protocol}//${parsed.host}${loc}`;
-          attempt(next);
+          attempt(next, usedToken);
+          return;
+        }
+        if (res.statusCode === 401 || res.statusCode === 403) {
+          // Thử lại với token nếu có và chưa dùng
+          if (!usedToken && hfToken) {
+            console.log(`\n    thử lại với HF_TOKEN…`);
+            attempt(srcUrl, hfToken);
+            return;
+          }
+          reject(new Error(
+            `HTTP ${res.statusCode} — cần HuggingFace token!\n` +
+            `  1. Đăng ký miễn phí tại https://huggingface.co\n` +
+            `  2. Lấy token tại https://huggingface.co/settings/tokens\n` +
+            `  3. Chạy lại: $env:HF_TOKEN="hf_xxx..." ; npm run download-model-fast`
+          ));
           return;
         }
         if (res.statusCode !== 200) {
@@ -101,7 +122,7 @@ function downloadFile(srcUrl, destPath) {
       }).on('error', reject);
     }
 
-    attempt(srcUrl);
+    attempt(srcUrl, '');
   });
 }
 

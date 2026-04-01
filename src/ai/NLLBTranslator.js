@@ -47,13 +47,12 @@ function toLangCode(name) {
 }
 
 // ── Worker Pool (2 workers, round-robin) ─────────────────────────────────────
-const POOL_SIZE   = 2;
+const POOL_SIZE   = 8;  // 1 worker — đủ dùng real-time, tiết kiệm ~1.5 GB RAM so với 2 workers
 const WORKER_PATH = path.join(__dirname, 'nllb-worker.js');
 
 // Model preference order: fastest first
 const MODELS_BY_SPEED = [
-  'nllb-200-distilled-200M',  // ~3x faster than 600M, prefer when available
-  'nllb-200-distilled-600M',  // fallback
+  'nllb-200-distilled-600M',
 ];
 
 function _pickModel(modelDir) {
@@ -141,6 +140,10 @@ class NLLBTranslator {
   }
 
   async translate(text) {
+    return this.translateRaw(text, this.srcCode, this.tgtCode);
+  }
+
+  async translateRaw(text, srcCode, tgtCode) {
     const t = text.trim();
     if (!t) return '';
     if (/^\s*[\[(][\w\s_]+[\])]\s*$/i.test(t)) return '';
@@ -152,7 +155,7 @@ class NLLBTranslator {
 
     return new Promise((resolve, reject) => {
       entry.pending.set(id, { resolve, reject });
-      entry.worker.postMessage({ type: 'translate', id, text: t, srcCode: this.srcCode, tgtCode: this.tgtCode });
+      entry.worker.postMessage({ type: 'translate', id, text: t, srcCode, tgtCode });
     });
   }
 

@@ -11,28 +11,25 @@ const { contextBridge, ipcRenderer } = require('electron');
 const INVOKE_CHANNELS = new Set([
   'config:get',
   'config:save',
-  'whisper:ping',          // kiểm tra whisper server có chạy không
+  'config:reset',
+  'whisper:ping',
+  'whisper:status',
   'pipeline:toggle',
   'pipeline:status',
   'overlay:setIgnoreMouse',
   'audio:listDevices',
-  'audio:getSources',      // Electron desktopCapturer sources cho system audio
-  'audio:sendChunk',       // Gửi PCM Int16 từ Web Audio API → main → Whisper
-  'settings:open',
-  'setup:start-pull',      // first-run: acknowledge model missing (NLLB is pre-bundled)
-  'setup:cancel',
+  'audio:getSources',
+  'audio:sendChunk',
 ]);
 
 // Channels renderer may listen to (main → renderer events)
 const LISTEN_CHANNELS = new Set([
   'pipeline:status',
   'pipeline:processing',
-  'pipeline:partial-transcript',
+  'pipeline:listening',
   'pipeline:transcript',
   'pipeline:translation',
-  'pipeline:translation:partial',
   'pipeline:error',
-  'setup:progress',
 ]);
 
 contextBridge.exposeInMainWorld('electron', {

@@ -217,23 +217,20 @@ ipc.on('pipeline:status', (d) => {
 
 ipc.on('pipeline:processing', (d) => setStage(d.stage));
 
-// pipeline:partial-transcript — hiển thị live typing trong chat
-ipc.on('pipeline:partial-transcript', ({ text, timestamp }) => {
-  if (!_liveEl) {
-    _liveEl = document.createElement('div');
-    _liveEl.className = 'segment segment--live';
-    _liveEl.innerHTML =
-      `<span class="seg-ts">${fmtTime(timestamp)}</span>` +
-      `<div class="seg-body">` +
-        `<div class="seg-orig"></div>` +
-        `<div class="seg-trans"></div>` +
-      `</div>`;
-    segContainer.appendChild(_liveEl);
-    _liveOrigEl = _liveEl.querySelector('.seg-orig');
-    // Giới hạn số segment hiển thị
-    while (segments.length >= MAX_SEG) segments.shift().el.remove();
-  }
-  _liveOrigEl.innerHTML = escHtml(text) + '<span class="typing-cursor"> ▌</span>';
+// pipeline:listening — âm thanh đang vào, hiển thị bong bóng "..."
+ipc.on('pipeline:listening', ({ timestamp }) => {
+  if (_liveEl) return; // đã có bubble rồi, không tạo thêm
+  _liveEl = document.createElement('div');
+  _liveEl.className = 'segment segment--live';
+  _liveEl.innerHTML =
+    `<span class="seg-ts">${fmtTime(timestamp)}</span>` +
+    `<div class="seg-body">` +
+      `<div class="seg-orig"><span class="typing-cursor">…</span></div>` +
+      `<div class="seg-trans"></div>` +
+    `</div>`;
+  segContainer.appendChild(_liveEl);
+  _liveOrigEl = _liveEl.querySelector('.seg-orig');
+  while (segments.length >= MAX_SEG) segments.shift().el.remove();
   _scrollToBottom();
 });
 
@@ -352,6 +349,16 @@ $('sp-btn-save').addEventListener('click', async () => {
   const st = $('sp-save-status');
   st.classList.add('visible');
   setTimeout(() => st.classList.remove('visible'), 2000);
+});
+
+$('sp-btn-reset').addEventListener('click', async () => {
+  if (!confirm('Reset toàn bộ cài đặt về mặc định?\n(Vị trí overlay sẽ không bị ảnh hưởng)')) return;
+  await ipc.invoke('config:reset');
+  await spLoad();
+  const st = $('sp-save-status');
+  st.textContent = '↺ Đã reset';
+  st.classList.add('visible');
+  setTimeout(() => { st.classList.remove('visible'); st.textContent = '✓ Saved'; }, 2500);
 });
 
 $('sp-btn-list-capture').addEventListener('click', async () => {

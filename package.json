@@ -8,6 +8,10 @@
     "dev": "electron . --dev",
     "download-model": "node scripts/download-nllb-model.js",
     "download-model-fast": "node scripts/download-nllb-model.js --model 200M",
+    "download-model-fast:auth": "node -e \"if(!process.env.HF_TOKEN){console.error('Thiếu HF_TOKEN!\\nCách lấy token:\\n  1. Đăng ký tại https://huggingface.co\\n  2. Vào https://huggingface.co/settings/tokens\\n  3. Tạo token (Read)\\n  4. Đặt: $env:HF_TOKEN=\\\"hf_xxx...\\\" rồi chạy lại lệnh này');process.exit(1)}\" && node scripts/download-nllb-model.js --model 200M",
+    "setup:python": "node scripts/setup-python-embed.js",
+    "setup:ct2": "python-embed\\python.exe -X utf8 scripts\\setup-nllb-ct2.py",
+    "setup:all": "npm run setup:python && npm run setup:ct2",
     "build": "electron-builder --win --x64",
     "build:portable": "electron-builder --win portable",
     "postinstall": "electron-rebuild"
@@ -15,27 +19,33 @@
   "build": {
     "appId": "com.trans.overlay",
     "productName": "Trans Overlay",
-    "copyright": "Copyright Â© 2026 Trans Overlay",
+    "copyright": "Copyright © 2026 Trans Overlay",
     "win": {
       "target": ["nsis", "portable"],
       "requestedExecutionLevel": "asInvoker"
     },
     "files": [
-      "**/*",
-      "!.git",
-      "!*.md",
-      "!*.ps1",
-      "!scripts/**",
+      "main.js",
+      "preload.js",
+      "config.js",
+      "renderer/**",
+      "src/**",
+      "node_modules/**",
       "!node_modules/.cache",
+      "!**/*.md",
+      "!**/*.ps1",
+      "!scripts/**",
       "!whisper-bin/**",
       "!whisper-models/**",
-      "!nllb-models/**",
-      "!vendor/**"
+      "!nllb-models/**"
     ],
     "extraResources": [
-      { "from": "whisper-bin",    "to": "whisper-bin"    },
-      { "from": "whisper-models", "to": "whisper-models" },
-      { "from": "nllb-models",    "to": "nllb-models"    }
+      { "from": "whisper-bin",        "to": "whisper-bin"         },
+      { "from": "whisper-models",     "to": "whisper-models",
+        "filter": ["ggml-base.bin"] },
+      { "from": "nllb-ct2-server.py", "to": "nllb-ct2-server.py"  },
+      { "from": "nllb-ct2-model",     "to": "nllb-ct2-model"      },
+      { "from": "python-embed",       "to": "python-embed"        }
     ],
     "nsis": {
       "oneClick": false,
@@ -44,11 +54,13 @@
       "createStartMenuShortcut": true,
       "createDesktopShortcut": true,
       "shortcutName": "Trans Overlay",
-      "installerHeaderIcon": "assets/icon.ico",
       "deleteAppDataOnUninstall": false
     },
+    "compression": "maximum",
+    "asar": true,
     "asarUnpack": [
       "**/*.node",
+      "node_modules/onnxruntime-node/**",
       "node_modules/onnxruntime-web/dist/*.wasm",
       "node_modules/@xenova/transformers/dist/*.wasm"
     ]

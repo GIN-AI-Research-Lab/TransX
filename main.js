@@ -1,27 +1,31 @@
 /**
  * main.js — Electron main process
- * Manages overlay window, tray, global hotkey, IPC, and the translation pipeline.
  */
 
 'use strict';
 
 const {
   app, BrowserWindow, ipcMain,
-  Tray, Menu, globalShortcut, nativeImage, screen,
+  Tray, Menu, globalShortcut, nativeImage,
   desktopCapturer, session,
 } = require('electron');
-const path         = require('path');
+
+// ── Performance flags (before any window is created) ────────────────────────────
+app.disableHardwareAcceleration();   // overlay chỉ là text — không cần GPU, tiết kiệm RAM
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
+
+const path           = require('path');
 const { loadConfig, saveConfig } = require('./config');
-const Pipeline     = require('./src/pipeline/Pipeline');
+const Pipeline       = require('./src/pipeline/Pipeline');
 const NLLBTranslator = require('./src/ai/NLLBTranslator');
 const { createSolidPNG } = require('./src/utils/pngHelper');
-const svcMgr       = require('./src/services/ServiceManager');
+const svcMgr         = require('./src/services/ServiceManager');
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let overlayWin, settingsWin, setupWin, tray;
-let pipeline    = null;
-let cfg         = loadConfig();
-let _setupDone  = null; // resolve() khi setup window hoàn thành
+let overlayWin, tray;
+let pipeline = null;
+let cfg      = loadConfig();
+cfg.whisperLanguage = svcMgr.sourceLangToWhisperLang(cfg.sourceLanguage) || 'auto';
 
 // ── Tray icon (generated programmatically — no external asset needed) ─────────
 function makeTrayImage(running) {
@@ -71,55 +75,6 @@ function createOverlay() {
   overlayWin.on('closed', () => { overlayWin = null; });
 }
 
-// ── Settings window ───────────────────────────────────────────────────────────
-function openSettings() {
-  if (settingsWin && !settingsWin.isDestroyed()) {
-    settingsWin.focus();
-    return;
-  }
-  settingsWin = new BrowserWindow({
-    width:  720,
-    height: 800,
-    title:  'Trans Overlay — Settings',
-    parent: overlayWin || undefined,
-    center: true,
-    resizable: true,
-    webPreferences: {
-      nodeIntegration:  false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
-  settingsWin.setMenuBarVisibility(false);
-  settingsWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
-  settingsWin.on('closed', () => { settingsWin = null; });
-}
-
-// ── First-run setup window ─────────────────────────────────────────────────────────
-function createSetupWindow() {
-  setupWin = new BrowserWindow({
-    width:  500,
-    height: 380,
-    center: true,
-    resizable:  false,
-    frame:      true,
-    title:      'Trans Overlay — First Run Setup',
-    webPreferences: {
-      nodeIntegration:  false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
-  setupWin.setMenuBarVisibility(false);
-  setupWin.loadFile(path.join(__dirname, 'renderer', 'setup.html'));
-  setupWin.on('closed', () => {
-    setupWin = null;
-    // If user closes window without finishing, still continue startup
-    _setupDone?.();
-    _setupDone = null;
-  });
-}
-
 // ── System tray ───────────────────────────────────────────────────────────────
 function createTray() {
   tray = new Tray(makeTrayImage(false));
@@ -144,10 +99,6 @@ function rebuildTrayMenu() {
       click: togglePipeline,
     },
     { type: 'separator' },
-    {
-      label: '⚙  Settings',
-      click: openSettings,
-    },
     {
       label: overlayWin?.isVisible() ? '👁  Hide Overlay' : '👁  Show Overlay',
       click: () => {
@@ -179,9 +130,8 @@ function buildPipeline() {
     rebuildTrayMenu();
   });
   pipeline.on('processing', (d) => overlayWin?.webContents.send('pipeline:processing', d));
+  pipeline.on('listening',  (d) => overlayWin?.webContents.send('pipeline:listening',  d));
   pipeline.on('transcript', (t) => overlayWin?.webContents.send('pipeline:transcript',  t));
-  pipeline.on('partial-transcript', (t) => overlayWin?.webContents.send('pipeline:partial-transcript', t));
-  pipeline.on('translation:partial', (d) => overlayWin?.webContents.send('pipeline:translation:partial', d));
   pipeline.on('translation', (d) => {
     overlayWin?.webContents.send('pipeline:translation', d);
   });
@@ -206,6 +156,11 @@ function setupIPC() {
 
   ipcMain.handle('config:save', (_e, partial) => {
     cfg = { ...cfg, ...partial };
+    // Auto-derive whisperLanguage from sourceLanguage (no manual user setting)
+    if (partial.sourceLanguage !== undefined) {
+      const lang = svcMgr.sourceLangToWhisperLang(cfg.sourceLanguage);
+      cfg.whisperLanguage = lang || 'auto';
+    }
     saveConfig(cfg);
     // Re-register hotkey if changed
     if (partial.hotkey !== undefined) {
@@ -218,6 +173,20 @@ function setupIPC() {
     if (pipeline && pipeline.isRunning) {
       pipeline.updateLanguages(cfg);
     }
+    return cfg;
+  });
+
+  ipcMain.handle('config:reset', () => {
+    const { defaults } = require('./config');
+    cfg = { ...defaults };
+    // Sync whisperLanguage from default sourceLanguage
+    cfg.whisperLanguage = svcMgr.sourceLangToWhisperLang(cfg.sourceLanguage) || 'auto';
+    saveConfig(cfg);
+    // Re-register hotkey với giá trị default
+    globalShortcut.unregisterAll();
+    if (cfg.hotkey) globalShortcut.register(cfg.hotkey, togglePipeline);
+    // Rebuild pipeline
+    if (pipeline && !pipeline.isRunning) buildPipeline();
     return cfg;
   });
 
@@ -245,6 +214,10 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('whisper:status', () => ({
+    running: svcMgr.whisperRunning,
+  }));
+
   ipcMain.handle('audio:getSources', async () => {
     try {
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
@@ -271,21 +244,9 @@ function setupIPC() {
     return { capture: ['Microphone mặc định'], render: ['System audio (desktopCapturer)'] };
   });
 
-  ipcMain.handle('settings:open', () => openSettings());
-
-  // ── Setup (first-run): NLLB model check ──────────────
-  ipcMain.handle('setup:start-pull', async () => {
-    // Model is pre-bundled — this handler just confirms OK and closes the setup window.
-    // If we reach here the model was already verified missing; instruct the user.
-    setupWin?.webContents.send('setup:progress', { status: 'model_missing', pct: -1 });
-  });
-
-  ipcMain.handle('setup:cancel', () => {
-    setupWin?.close();
-    _setupDone?.();
-    _setupDone = null;
-    app.quit();
-  });
+  // ── Setup (first-run): NLLB model check handled silently ──────────────
+  ipcMain.handle('setup:start-pull', async () => {});
+  ipcMain.handle('setup:cancel', () => { app.quit(); });
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
@@ -306,26 +267,14 @@ app.whenReady().then(async () => {
     catch (e) { console.warn('[hotkey] could not register:', cfg.hotkey); }
   }
 
-  // ── Start background services ──────────────────────
-  console.log('[app] Starting Whisper service…');
-  await svcMgr.startWhisper(8080).catch((e) => console.warn('[whisper]', e.message));
+  // ── Start services ──────────────────────────────────────
+  await svcMgr.startWhisper(cfg).catch((e) => console.warn('[whisper]', e.message));
+  await svcMgr.startNLLB(cfg).catch((e) => console.warn('[nllb-ct2]', e.message));
 
-  // ── First-run: verify NLLB model files are present ───────────────
-  if (cfg.translateEnabled) {
-    const nllbDir = svcMgr.nllbModelDir;
-    if (!NLLBTranslator.modelExists(nllbDir)) {
-      console.log('[app] NLLB model missing — showing setup window');
-      await new Promise((resolve) => {
-        _setupDone = resolve;
-        createSetupWindow();
-      });
-    } else {
-      // Pre-warm the model pipeline in the background
-      NLLBTranslator.prewarm(nllbDir);
-    }
+  if (cfg.translateEnabled && !NLLBTranslator.modelExists(svcMgr.nllbModelDir)) {
+    console.warn('[app] NLLB model not found. Run: npm run download-model-fast');
   }
 
-  // ── Open main overlay ─────────────────────────
   createOverlay();
   if (!cfg.startMinimized) overlayWin?.show();
 });

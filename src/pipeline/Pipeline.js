@@ -21,6 +21,7 @@ const { EventEmitter } = require('events');
 const AudioBuffer     = require('../audio/AudioBuffer');
 const WhisperClient   = require('../ai/WhisperClient');
 const NLLBTranslator  = require('../ai/NLLBTranslator');
+const NLLBClient      = require('../ai/NLLBClient');
 
 // Format elapsed ms → 'M:SS'
 function fmtTime(ms) {
@@ -32,6 +33,109 @@ function fmtTime(ms) {
 const CONTEXT_WINDOW = 5; // số câu giữ lại làm ngữ cảnh
 // Match bất kỳ chuỗi nằm trong [...] hoặc (...) — bao gồm cả Unicode/tiếng Nhật
 const BLANK_PATTERN  = /^\s*\[[^\[\]]+\]\s*$|^\s*\([^()]+\)\s*$/;
+
+// ── Sentence-level accumulator ────────────────────────────────────────────
+/**
+ * Gom các mảnh transcript từ Whisper cho đến khi phát hiện dấu câu kết thúc
+ * (. ! ? 。 ！ ？) hoặc hết timeout, rồi mới gửi đi dịch.
+ *
+ * Điều này giải quyết vấn đề AudioBuffer cắt âm thanh theo khoảng lặng
+ * (pause giữa vế câu) thay vì theo ranh giới câu thật sự.
+ */
+class SentenceAccumulator {
+  /**
+   * @param {object} opts
+   * @param {number}   [opts.maxWaitMs=2000]  ms tối đa chờ câu hoàn chỉnh
+   * @param {number}   [opts.maxChars=150]    flush ngay nếu text quá dài
+   * @param {string}   [opts.language='']     ISO lang để điều chỉnh clause detection
+   * @param {Function} opts.onFlush           callback(text, timestamp, epoch)
+   */
+  constructor({ maxWaitMs = 2000, maxChars = 150, language = '', onFlush } = {}) {
+    this._parts      = [];
+    this._firstTs    = null;
+    this._firstEpoch = null;
+    this._timer      = null;
+    this._maxWaitMs  = maxWaitMs;
+    this._maxChars   = maxChars;
+    this._language   = language;  // 'ja', 'en', 'vi', ...
+    this._onFlush    = onFlush;
+  }
+
+  push(text, timestamp, epoch) {
+    if (this._parts.length === 0) {
+      this._firstTs    = timestamp;
+      this._firstEpoch = epoch;
+    }
+    this._parts.push(text);
+    const joined = this._joined();
+
+    if (this._isSentenceEnd(joined) || this._isClauseEnd(joined) || joined.length >= this._maxChars) {
+      this._doFlush();
+      return;
+    }
+
+    // Bắt đầu đếm ngược — flush nếu không có câu hoàn chỉnh sau maxWaitMs
+    if (!this._timer) {
+      this._timer = setTimeout(() => {
+        this._timer = null;
+        this._doFlush();
+      }, this._maxWaitMs);
+    }
+  }
+
+  _joined() {
+    if (this._parts.length === 0) return '';
+    // Tiếng Nhật không cần khoảng trắng giữa các từ/vế
+    const hasJapanese = /[\u3040-\u30ff\u4e00-\u9fff]/.test(this._parts[0]);
+    return hasJapanese
+      ? this._parts.join('').trim()
+      : this._parts.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  _isSentenceEnd(text) {
+    // Dấu câu kết thúc: . ! ? 。 ！ ？
+    return /[.!?。！？]\s*$/.test(text);
+  }
+
+  /**
+   * Phát hiện ranh giới vế câu (clause) để flush sớm hơn mà không cần
+   * chờ dấu câu kết thúc đầy đủ.
+   * - Tiếng Nhật: dấu 、 hoặc ， sau ≥15 ký tự
+   * - Tiếng Anh/Latin: dấu , ; sau ≥60 ký tự (câu đủ dài, không phải list)
+   */
+  _isClauseEnd(text) {
+    const t = text.trim();
+    if (this._language === 'ja') {
+      // 、(U+3001) và ，(U+FF0C): clause boundary rõ ràng trong tiếng Nhật
+      return /[\u3001\uff0c]\s*$/.test(t) && t.length >= 15;
+    }
+    // English/Latin: comma hoặc semicolon sau câu đủ dài
+    return /[,;]\s*$/.test(t) && t.length >= 60;
+  }
+
+  _doFlush() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    const text  = this._joined();
+    const ts    = this._firstTs;
+    const epoch = this._firstEpoch;
+    this._parts      = [];
+    this._firstTs    = null;
+    this._firstEpoch = null;
+    if (text && this._onFlush) this._onFlush(text, ts, epoch);
+  }
+
+  /** Flush ngay lập tức bất kể trạng thái — dùng khi stop() */
+  forceFlush() {
+    if (this._parts.length > 0) this._doFlush();
+  }
+
+  reset() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    this._parts      = [];
+    this._firstTs    = null;
+    this._firstEpoch = null;
+  }
+}
 
 // Whisper hallucination phrases — produced when audio has no real speech
 // (music, silence, noise). Expand this list as needed.
@@ -66,6 +170,18 @@ function _srcToWhisperLang(src) {
   return WHISPER_LANG[src] || 'auto';
 }
 
+// initial_prompt gợi ý Whisper xuất dấu câu đúng
+// Lưu ý: dùng như "văn bản trước đó" — phải ngẫn gọn và ngữ nhiên, không phải là hướng dẫn
+const WHISPER_PROMPTS = {
+  'en': 'Welcome. Okay. So,',     // conditioning: English với dấu câu tự nhiên
+  'ja': 'こちらこそ。はい。そこで、',  // conditioning: Japanese với kana + dấu 。、
+  'vi': 'Vâng. Ok. Vậy,',          // conditioning: Vietnamese
+};
+function _srcToInitialPrompt(src) {
+  const lang = _srcToWhisperLang(src);
+  return WHISPER_PROMPTS[lang] || '';
+}
+
 class Pipeline extends EventEmitter {
   constructor(cfg = {}) {
     super();
@@ -76,8 +192,16 @@ class Pipeline extends EventEmitter {
       silenceMs:  cfg.silenceMs  || 900,
       silenceRMS: cfg.silenceRMS || 280,
     });
-    this.whisper    = new WhisperClient({ ...cfg, whisperLanguage: _srcToWhisperLang(cfg.sourceLanguage) });
-    this.translator = new NLLBTranslator(cfg);
+    this.whisper    = new WhisperClient({
+      ...cfg,
+      whisperLanguage:    _srcToWhisperLang(cfg.sourceLanguage),
+      whisperInitialPrompt: _srcToInitialPrompt(cfg.sourceLanguage),
+    });
+    // _nllbOnnx is created lazily in start() only when CT2 is unavailable.
+    // This avoids loading the ~1.5 GB ONNX worker when CT2 runs fine.
+    this._nllbOnnx  = null;
+    this._nllbCt2   = new NLLBClient(cfg);
+    this.translator = null;
 
     this.isRunning    = false;
     this._queue       = [];      // full audio chunks waiting for STT
@@ -90,6 +214,25 @@ class Pipeline extends EventEmitter {
     this._epoch       = 0;       // tăng mỗi lần stop() — discard kết quả cũ
     this._context     = [];
     this._recentTexts = [];      // dedup: last N complete transcripts
+
+    // Gom mảnh transcript thành câu hoàn chỉnh trước khi dịch
+    this._sentAccum = new SentenceAccumulator({
+      maxWaitMs: 2000,
+      maxChars:  150,
+      language:  _srcToWhisperLang(cfg.sourceLanguage),
+      onFlush: (text, timestamp, epoch) => {
+        if (this._epoch !== epoch) return; // đã stop() rồi — bỏ qua
+        const id = ++this._segId;
+        this.emit('transcript', { text, timestamp, id });
+        if (!this.cfg.translateEnabled) {
+          this._addContext(text, '');
+          this.emit('translation', { original: text, translated: '', timestamp, id });
+          return;
+        }
+        this._transQueue.push({ transcript: text, timestamp, id, epoch: this._epoch });
+        this._drainTranslation();
+      },
+    });
   }
 
   // ── Start / Stop ──────────────────────────────────────────────────
@@ -106,16 +249,41 @@ class Pipeline extends EventEmitter {
       return;
     }
 
+    // Chọn translator: CT2 nếu server đang chạy, fallback ONNX (lazy init)
+    const ct2ok = await this._nllbCt2.ping();
+    if (ct2ok) {
+      this.translator = this._nllbCt2;
+      console.log('[pipeline] translator: CTranslate2 (CT2)');
+    } else {
+      // Only use ONNX fallback if model files are present locally
+      const svcMgr = require('../services/ServiceManager');
+      const fs     = require('fs');
+      const path   = require('path');
+      const onnxConfig = path.join(svcMgr.nllbModelDir, 'nllb-200-distilled-600M', 'config.json');
+      if (!fs.existsSync(onnxConfig)) {
+        this.emit('error', new Error(
+          'CT2 translation server chưa sẵn sàng.\n' +
+          'Vui lòng chờ vài giây rồi thử lại bắt đầu dịch.'
+        ));
+        this.isRunning = false;
+        return;
+      }
+      if (!this._nllbOnnx) this._nllbOnnx = new NLLBTranslator(this.cfg);
+      this.translator = this._nllbOnnx;
+      console.log('[pipeline] translator: ONNX (CT2 not available)');
+    }
+
+    this._sentAccum.reset();
     this.abuf.removeAllListeners('chunk');
-    this.abuf.removeAllListeners('partial');
+    this.abuf.removeAllListeners('started');
+    this.abuf.on('started', (startMs) => {
+      // Notify renderer to show '...' listening bubble
+      this.emit('listening', { timestamp: startMs - this._startTime });
+    });
     this.abuf.on('chunk', (buf, startMs) => {
       const elapsed = startMs - this._startTime;
       this._queue.push({ buf, timestamp: elapsed });
       this._drainSTT();
-    });
-    this.abuf.on('partial', (buf, startMs) => {
-      const elapsed = startMs - this._startTime;
-      this._handlePartial(buf, elapsed);
     });
 
     this._startTime = Date.now();
@@ -129,6 +297,9 @@ class Pipeline extends EventEmitter {
     if (!this.isRunning) return;
     // Tăng epoch — mọi STT/translation đang chờ sẽ bị discard khi hoàn thành
     this._epoch++;
+    // Flush và reset sentence accumulator — không để câu dở dang
+    this._sentAccum.forceFlush();
+    this._sentAccum.reset();
     // Dừng audio input ngay
     this.abuf.reset();
     this.abuf.removeAllListeners('chunk');
@@ -154,8 +325,14 @@ class Pipeline extends EventEmitter {
   // ── Config hot-swap (while stopped) ──────────────────────────────
   updateConfig(cfg) {
     this.cfg        = cfg;
-    this.whisper    = new WhisperClient({ ...cfg, whisperLanguage: _srcToWhisperLang(cfg.sourceLanguage) });
-    this.translator = new NLLBTranslator(cfg);
+    this.whisper    = new WhisperClient({
+      ...cfg,
+      whisperLanguage:      _srcToWhisperLang(cfg.sourceLanguage),
+      whisperInitialPrompt: _srcToInitialPrompt(cfg.sourceLanguage),
+    });
+    this._nllbOnnx  = null; // reset lazy — will re-init in start() if CT2 unavailable
+    this._nllbCt2   = new NLLBClient(cfg);
+    this.translator = null;
     this.abuf       = new AudioBuffer({
       sampleRate: cfg.sampleRate || 16000,
       maxMs:      cfg.chunkMaxMs || 5000,
@@ -166,26 +343,16 @@ class Pipeline extends EventEmitter {
 
   // ── Language hot-swap (while running) ───────────────────────
   updateLanguages(cfg) {
-    this.whisper.language = _srcToWhisperLang(cfg.sourceLanguage);
-    this.translator.updateLanguage(cfg);
+    const lang = _srcToWhisperLang(cfg.sourceLanguage);
+    this.whisper.language       = lang;
+    this.whisper.initialPrompt  = _srcToInitialPrompt(cfg.sourceLanguage);
+    if (this._nllbOnnx) this._nllbOnnx.updateLanguage(cfg);
+    this._nllbCt2.updateLanguage(cfg);
+    this._sentAccum._language   = lang;  // cập nhật clause detection
   }
 
-  // ── Internal: partial audio preview ─────────────────────────────
-  async _handlePartial(buf, timestamp) {
-    // Skip if Whisper is currently busy — avoid flooding the server
-    if (this._whisperBusy) return;
-    this._whisperBusy = true;
-    try {
-      const text = await this.whisper.transcribe(buf);
-      if (text && !_isNoise(text.trim())) {
-        this.emit('partial-transcript', { text: text.trim(), timestamp });
-      }
-    } catch {
-      // Ignore partial errors silently
-    } finally {
-      this._whisperBusy = false;
-    }
-  }
+  // ── Internal: partial audio preview ───────────────────────
+  // (removed — no longer sending audio to Whisper mid-chunk)
 
   // ── Internal: STT queue drain ────────────────────────────────────
   async _drainSTT() {
@@ -223,23 +390,15 @@ class Pipeline extends EventEmitter {
 
     transcript = transcript.trim();
 
-    // Repetition dedup: reject if same text appeared in last 3 chunks
+    // Repetition dedup: reject nhanh nếu đúng text này vừa xuất hiện
     if (this._recentTexts.includes(transcript)) return;
     this._recentTexts.push(transcript);
-    if (this._recentTexts.length > 3) this._recentTexts.shift();
+    if (this._recentTexts.length > 5) this._recentTexts.shift();
 
-    const id = ++this._segId;
-    this.emit('transcript', { text: transcript, timestamp, id });
-
-    if (!this.cfg.translateEnabled) {
-      this._addContext(transcript, '');
-      this.emit('translation', { original: transcript, translated: '', timestamp, id });
-      return;
-    }
-
-    // Enqueue translation — runs in background (don't await)
-    this._transQueue.push({ transcript, timestamp, id, epoch: this._epoch });
-    this._drainTranslation();
+    // Đưa mảnh transcript vào SentenceAccumulator.
+    // Accumulator sẽ gom lại và chỉ emit 'transcript' + enqueue dịch
+    // khi phát hiện dấu câu kết thúc hoặc hết timeout.
+    this._sentAccum.push(transcript, timestamp, this._epoch);
   }
 
   // ── Internal: Translation queue drain ───────────────────────────
@@ -262,7 +421,16 @@ class Pipeline extends EventEmitter {
     this.emit('processing', { stage: 'translation' });
     let translated = '';
     try {
-      translated = await this.translator.translate(transcript);
+      if (this._shouldPivot()) {
+        // Pivot: CJK/Arabic → English → target (improves quality for low-resource pairs)
+        const english = await this.translator.translateRaw(
+          transcript, this.translator.srcCode, 'eng_Latn',
+        );
+        if (!english || this._epoch !== epoch) return;
+        translated = await this.translator.translateRaw(english, 'eng_Latn', this.translator.tgtCode);
+      } else {
+        translated = await this.translator.translate(transcript);
+      }
     } catch (err) {
       throw new Error(`Translation failed: ${err.message}`);
     }
@@ -271,6 +439,13 @@ class Pipeline extends EventEmitter {
       this._addContext(transcript, translated);
       this.emit('translation', { original: transcript, translated, timestamp, id });
     }
+  }
+
+  /** Tự động dùng pivot khi nguồn là CJK/Arabic và đích không phải English */
+  _shouldPivot() {
+    if (!this.translator) return false;
+    const PIVOT_SOURCES = new Set(['jpn_Jpan', 'zho_Hans', 'kor_Hang', 'tha_Thai', 'arb_Arab']);
+    return PIVOT_SOURCES.has(this.translator.srcCode) && this.translator.tgtCode !== 'eng_Latn';
   }
 
   /** Thêm vào cửa sổ ngữ cảnh, giữ tối đa CONTEXT_WINDOW câu */

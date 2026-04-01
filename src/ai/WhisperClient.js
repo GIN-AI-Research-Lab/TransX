@@ -17,18 +17,20 @@ class WhisperClient {
   /**
    * @param {object} cfg
    * @param {string} cfg.whisperEndpoint  e.g. "http://localhost:8080"
-   * @param {string} cfg.whisperLanguage  ISO code or "auto"
+   * @param {string} cfg.whisperLanguage       ISO code or "auto"
+   * @param {string} cfg.whisperInitialPrompt  gợi ý cho model tạo dấu câu đúng
    * @param {number} cfg.sampleRate
-   * @param {number} cfg.whisperTimeout   ms
+   * @param {number} cfg.whisperTimeout        ms
    */
   constructor(cfg = {}) {
     // Đổi localhost → 127.0.0.1 để tránh Node.js 18+ resolve IPv6 trước IPv4
     this.endpoint  = (cfg.whisperEndpoint || 'http://127.0.0.1:8080')
       .replace(/\/$/, '')
       .replace(/\/\/localhost\b/i, '//127.0.0.1');
-    this.language  = cfg.whisperLanguage || 'auto';
-    this.sampleRate = cfg.sampleRate || 16000;
-    this.timeout   = cfg.whisperTimeout || 30000;
+    this.language      = cfg.whisperLanguage || 'auto';
+    this.initialPrompt = cfg.whisperInitialPrompt || '';
+    this.sampleRate    = cfg.sampleRate || 16000;
+    this.timeout       = cfg.whisperTimeout || 30000;
   }
 
   // ── PCM → WAV ─────────────────────────────────────────────────────
@@ -105,6 +107,11 @@ class WhisperClient {
     if (this.language && this.language !== 'auto') {
       form.append('language', this.language);
     }
+    if (this.initialPrompt) {
+      form.append('initial_prompt', this.initialPrompt);
+    }
+    // temperature=0: output định thức, giảm hallucination (quan trọng cho tiếng Nhật)
+    form.append('temperature', '0');
     // faster-whisper-server uses 'response_format'
     form.append('response_format', 'json');
 
