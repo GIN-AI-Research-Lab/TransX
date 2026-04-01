@@ -79,11 +79,11 @@ function openSettings() {
   }
   settingsWin = new BrowserWindow({
     width:  720,
-    height: 640,
+    height: 800,
     title:  'Trans Overlay — Settings',
     parent: overlayWin || undefined,
     center: true,
-    resizable: false,
+    resizable: true,
     webPreferences: {
       nodeIntegration:  false,
       contextIsolation: true,
