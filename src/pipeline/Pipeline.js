@@ -45,12 +45,12 @@ const BLANK_PATTERN  = /^\s*\[[^\[\]]+\]\s*$|^\s*\([^()]+\)\s*$/;
 class SentenceAccumulator {
   /**
    * @param {object} opts
-   * @param {number}   [opts.maxWaitMs=2000]  ms tối đa chờ câu hoàn chỉnh
-   * @param {number}   [opts.maxChars=150]    flush ngay nếu text quá dài
+   * @param {number}   [opts.maxWaitMs=3000]  ms tối đa chờ câu hoàn chỉnh
+   * @param {number}   [opts.maxChars=200]    flush ngay nếu text quá dài
    * @param {string}   [opts.language='']     ISO lang để điều chỉnh clause detection
    * @param {Function} opts.onFlush           callback(text, timestamp, epoch)
    */
-  constructor({ maxWaitMs = 2000, maxChars = 150, language = '', onFlush } = {}) {
+  constructor({ maxWaitMs = 3000, maxChars = 200, language = '', onFlush } = {}) {
     this._parts      = [];
     this._firstTs    = null;
     this._firstEpoch = null;
@@ -69,18 +69,19 @@ class SentenceAccumulator {
     this._parts.push(text);
     const joined = this._joined();
 
-    if (this._isSentenceEnd(joined) || this._isClauseEnd(joined) || joined.length >= this._maxChars) {
+    // Flush ngay nếu phát hiện câu hoàn chỉnh hoặc text quá dài
+    if (this._isSentenceEnd(joined) || joined.length >= this._maxChars) {
       this._doFlush();
       return;
     }
 
-    // Bắt đầu đếm ngược — flush nếu không có câu hoàn chỉnh sau maxWaitMs
-    if (!this._timer) {
-      this._timer = setTimeout(() => {
-        this._timer = null;
-        this._doFlush();
-      }, this._maxWaitMs);
-    }
+    // Reset timer mỗi lần nhận thêm text mới — chờ thêm maxWaitMs
+    // từ chunk cuối cùng (thay vì từ chunk đầu tiên)
+    if (this._timer) clearTimeout(this._timer);
+    this._timer = setTimeout(() => {
+      this._timer = null;
+      this._doFlush();
+    }, this._maxWaitMs);
   }
 
   _joined() {
@@ -93,24 +94,12 @@ class SentenceAccumulator {
   }
 
   _isSentenceEnd(text) {
-    // Dấu câu kết thúc: . ! ? 。 ！ ？
-    return /[.!?。！？]\s*$/.test(text);
-  }
-
-  /**
-   * Phát hiện ranh giới vế câu (clause) để flush sớm hơn mà không cần
-   * chờ dấu câu kết thúc đầy đủ.
-   * - Tiếng Nhật: dấu 、 hoặc ， sau ≥15 ký tự
-   * - Tiếng Anh/Latin: dấu , ; sau ≥60 ký tự (câu đủ dài, không phải list)
-   */
-  _isClauseEnd(text) {
     const t = text.trim();
-    if (this._language === 'ja') {
-      // 、(U+3001) và ，(U+FF0C): clause boundary rõ ràng trong tiếng Nhật
-      return /[\u3001\uff0c]\s*$/.test(t) && t.length >= 15;
-    }
-    // English/Latin: comma hoặc semicolon sau câu đủ dài
-    return /[,;]\s*$/.test(t) && t.length >= 60;
+    // Dấu câu kết thúc rõ ràng
+    if (/[.!?。！？]\s*$/.test(t)) return true;
+    // Tiếng Nhật: clause boundary rõ ràng (dấu 、 hoặc ，) sau ≥15 ký tự
+    if (this._language === 'ja' && /[\u3001\uff0c]\s*$/.test(t) && t.length >= 15) return true;
+    return false;
   }
 
   _doFlush() {
@@ -217,8 +206,8 @@ class Pipeline extends EventEmitter {
 
     // Gom mảnh transcript thành câu hoàn chỉnh trước khi dịch
     this._sentAccum = new SentenceAccumulator({
-      maxWaitMs: 2000,
-      maxChars:  150,
+      maxWaitMs: 3000,
+      maxChars:  200,
       language:  _srcToWhisperLang(cfg.sourceLanguage),
       onFlush: (text, timestamp, epoch) => {
         if (this._epoch !== epoch) return; // đã stop() rồi — bỏ qua
