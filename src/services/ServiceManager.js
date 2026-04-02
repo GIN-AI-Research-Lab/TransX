@@ -60,7 +60,7 @@ class ServiceManager {
     const base  = path.join(this._root, 'whisper-models', 'ggml-base.bin');
     const small = path.join(this._root, 'whisper-models', 'ggml-small.bin');
     const tiny  = path.join(this._root, 'whisper-models', 'ggml-tiny.bin');
-    // Ưu tiên model lớn hơn để nhận dạng JP/ZH tốt hơn
+    // Prefer larger models for better JP/ZH recognition accuracy
     if (fs.existsSync(small)) return small;
     if (fs.existsSync(base))  return base;
     if (fs.existsSync(tiny))  return tiny;
@@ -179,9 +179,9 @@ class ServiceManager {
       const onData = (d) => {
         const line = d.toString().trim();
         if (line) console.log('[nllb-ct2]', line);
-        // Chờ "Listening" — lúc này HTTP server đã bind port thật sự
+        // Wait for "Listening" — at this point the HTTP server has actually bound the port
         if (/listening/i.test(line)) done();
-        // Fail fast chỉ khi Python in thông báo lỗi rõ ràng (sys.exit / import error)
+        // Fail fast only when Python prints an explicit error (sys.exit / import error)
         if (!resolved && /^\[nllb-ct2\].*(missing|not found|MISSING|sys\.exit)/i.test(line)) done();
       };
       proc.stdout.on('data', onData);
@@ -201,7 +201,7 @@ class ServiceManager {
         }
       });
 
-      setTimeout(done, 60000); // CT2 model load có thể mất 30-60s lần đầu
+      setTimeout(done, 60000); // CT2 model load can take 30–60s on first run
     });
   }
 

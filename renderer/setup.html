@@ -136,32 +136,32 @@
 
     <!-- ── Model missing error ── -->
     <div id="step-download">
-      <p class="step-title">Model NLLB-200 không tìm thấy</p>
+      <p class="step-title">NLLB-200 model not found</p>
       <p class="step-sub">
-        Các file model dịch thuật chưa có trong thư mục <code>nllb-models/</code>.<br>
-        Hãy chạy lệnh sau trong thư mục dự án rồi khởi động lại ứng dụng:
+        The translation model files are missing from the <code>nllb-models/</code> folder.<br>
+        Run the following command in the project directory, then restart the application:
       </p>
       <pre style="background:#313244;border-radius:6px;padding:10px 14px;font-size:12px;
                   color:#a6e3a1;text-align:left;margin-bottom:20px;word-break:break-all">
 npm run download-model</pre>
       <p style="font-size:11px;color:#6c7086;margin-bottom:20px">
-        (~560 MB, cần kết nối Internet một lần duy nhất)
+        (~560 MB, requires a one-time internet connection)
       </p>
-      <button class="btn-cancel" id="btn-cancel">Thoát</button>
+      <button class="btn-cancel" id="btn-cancel">Quit</button>
     </div>
 
     <!-- ── Done (unused for NLLB — model is always pre-bundled) ── -->
     <div id="step-done">
       <div class="done-icon">✅</div>
-      <p class="done-text">Model sẵn sàng!</p>
-      <p class="done-sub">Đang mở ứng dụng…</p>
+      <p class="done-text">Model ready!</p>
+      <p class="done-sub">Opening application…</p>
     </div>
 
     <!-- ── Error ── -->
     <div id="step-error">
       <div class="error-icon">⚠️</div>
       <p class="error-msg" id="error-msg"></p>
-      <button class="btn-retry" id="btn-retry">Đóng</button>
+      <button class="btn-retry" id="btn-retry">Close</button>
     </div>
   </div>
 

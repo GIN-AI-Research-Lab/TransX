@@ -11,9 +11,9 @@ const {
 } = require('electron');
 
 // ── Performance flags (before any window is created) ────────────────────────────
-app.disableHardwareAcceleration();   // overlay chỉ là text — không cần GPU, tiết kiệm RAM
-app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');  // tránh lỗi cache Access Denied
-app.commandLine.appendSwitch('disable-http-cache');             // tắt Chromium HTTP disk cache
+app.disableHardwareAcceleration();   // overlay is text-only — GPU not needed, saves RAM
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');  // avoid cache Access Denied errors
+app.commandLine.appendSwitch('disable-http-cache');             // disable Chromium HTTP disk cache
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
 
 const path           = require('path');
@@ -59,7 +59,7 @@ function createOverlay() {
   overlayWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   overlayWin.setAlwaysOnTop(true, 'screen-saver');
 
-  // Mở DevTools khi chạy với flag --dev
+  // Open DevTools when launched with the --dev flag
   if (process.argv.includes('--dev')) {
     overlayWin.webContents.openDevTools({ mode: 'detach' });
   }
@@ -169,9 +169,9 @@ function setupIPC() {
       globalShortcut.unregisterAll();
       if (cfg.hotkey) globalShortcut.register(cfg.hotkey, togglePipeline);
     }
-    // Rebuild pipeline với settings mới (nếu đang dừng)
+    // Rebuild pipeline with updated settings (only when stopped)
     if (pipeline && !pipeline.isRunning) buildPipeline();
-    // Nếu đang chạy: cập nhật ngôn ngữ ngay lập tức (hot-swap)
+    // If already running: update languages immediately (hot-swap)
     if (pipeline && pipeline.isRunning) {
       pipeline.updateLanguages(cfg);
     }
@@ -184,7 +184,7 @@ function setupIPC() {
     // Sync whisperLanguage from default sourceLanguage
     cfg.whisperLanguage = svcMgr.sourceLangToWhisperLang(cfg.sourceLanguage) || 'auto';
     saveConfig(cfg);
-    // Re-register hotkey với giá trị default
+    // Re-register hotkey with the default value
     globalShortcut.unregisterAll();
     if (cfg.hotkey) globalShortcut.register(cfg.hotkey, togglePipeline);
     // Rebuild pipeline
@@ -233,7 +233,7 @@ function setupIPC() {
   ipcMain.handle('audio:sendChunk', (_e, int16Arr) => {
     if (!pipeline?.isRunning) return;
     try {
-      // int16Arr là Array<number> (số nguyên 16-bit) được gửi từ audioCapture.js
+      // int16Arr is Array<number> (16-bit integers) sent from audioCapture.js
       const buf = Buffer.from(new Int16Array(int16Arr).buffer);
       pipeline.receivePCM(buf);
     } catch (e) {
@@ -242,8 +242,8 @@ function setupIPC() {
   });
 
   ipcMain.handle('audio:listDevices', async () => {
-    // Giữ lại cho Settings > Audio device list
-    return { capture: ['Microphone mặc định'], render: ['System audio (desktopCapturer)'] };
+    // Kept for Settings > Audio device list
+    return { capture: ['Default microphone'], render: ['System audio (desktopCapturer)'] };
   });
 
   // ── Setup (first-run): NLLB model check handled silently ──────────────

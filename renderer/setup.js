@@ -25,7 +25,7 @@ ipc.on('setup:progress', ({ status }) => {
   } else if (status === 'success') {
     stepDownload.style.display = 'none';
     stepDone.style.display     = 'block';
-  } else if (status && /error|lỗi/i.test(status)) {
+  } else if (status && /error/i.test(status)) {
     stepDownload.style.display = 'none';
     stepError.style.display    = 'block';
     if (errorMsg) errorMsg.textContent = status;

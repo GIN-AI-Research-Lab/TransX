@@ -19,7 +19,7 @@
         <span id="dot" class="dot dot--idle" title="Status"></span>
 
         <button id="btn-toggle"   class="cbtn" title="Start / Stop (Ctrl+Shift+T)">▶</button>
-        <button id="btn-clear"    class="cbtn cbtn--clear" title="Xóa nội dung dịch">🗑</button>
+        <button id="btn-clear"    class="cbtn cbtn--clear" title="Clear translation">🗑</button>
         <button id="btn-settings" class="cbtn" title="Settings">⚙</button>
         <button id="btn-pass"     class="cbtn cbtn--active" title="Click-through: OFF">📌</button>
         <button id="btn-hide"     class="cbtn" title="Hide overlay">—</button>
@@ -44,8 +44,8 @@
             <div class="sp-field">
               <label for="sp-audioInputDevice">Microphone</label>
               <div class="sp-row">
-                <input id="sp-audioInputDevice" type="text" placeholder="Để trống = mặc định">
-                <button id="sp-btn-list-capture" title="Chọn từ danh sách">▾</button>
+                <input id="sp-audioInputDevice" type="text" placeholder="Leave blank for default">
+                <button id="sp-btn-list-capture" title="Pick from list">▾</button>
               </div>
               <select id="sp-capture-select" class="sp-device-select hidden" size="4"></select>
             </div>
@@ -53,20 +53,20 @@
         </details>
 
         <details class="sp-section" open>
-          <summary class="sp-section-title">🌐 Dịch thuật</summary>
+          <summary class="sp-section-title">🌐 Translation</summary>
           <div class="sp-section-body">
             <div class="sp-field">
-              <label for="sp-sourceLanguage">Ngôn ngữ nguồn</label>
+              <label for="sp-sourceLanguage">Source language</label>
               <select id="sp-sourceLanguage">
                 <option value="English">English</option>
                 <option value="Japanese">Japanese — 日本語</option>
-                <option value="Vietnamese">Vietnamese — Tiếng Việt</option>
+                <option value="Vietnamese">Vietnamese</option>
               </select>
             </div>
             <div class="sp-field">
-              <label for="sp-targetLanguage">Ngôn ngữ đích</label>
+              <label for="sp-targetLanguage">Target language</label>
               <select id="sp-targetLanguage">
-                <option value="Vietnamese">Vietnamese — Tiếng Việt</option>
+                <option value="Vietnamese">Vietnamese</option>
                 <option value="English">English</option>
                 <option value="Japanese">Japanese — 日本語</option>
               </select>
@@ -89,7 +89,7 @@
         </details>
 
         <details class="sp-section">
-          <summary class="sp-section-title">⚙ Ứng dụng</summary>
+          <summary class="sp-section-title">⚙ Application</summary>
           <div class="sp-section-body">
             <div class="sp-field">
               <label for="sp-hotkey">Hotkey</label>
@@ -129,7 +129,7 @@
         <span class="seg-ts" id="pending-ts"></span>
         <div class="seg-body">
           <div class="seg-orig" id="pending-orig"></div>
-          <div class="seg-trans" id="pending-trans">⟳ Đang dịch…</div>
+          <div class="seg-trans" id="pending-trans">⟳ Translating…</div>
         </div>
       </div>
     </div>

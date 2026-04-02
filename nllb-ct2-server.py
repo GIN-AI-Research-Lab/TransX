@@ -75,8 +75,8 @@ def main():
     translator = ctranslate2.Translator(
         ct2_dir,
         device="cpu",
-        inter_threads=1,   # 1 thread pool → đảm bảo memory thấp
-        intra_threads=2,   # 2 threads per request → cân bằng tốt với Whisper
+        inter_threads=1,   # 1 thread pool → keeps memory usage low
+        intra_threads=2,   # 2 threads per request → good balance alongside Whisper
     )
 
     sp = spm.SentencePieceProcessor()
@@ -84,14 +84,14 @@ def main():
     print("[nllb-ct2] Model ready.", flush=True)
 
     # ── Translation function ───────────────────────────────────────────────
-    # CJK language codes — context prepend không có hiệu quả vì tokenizer
-    # nhập 2 câu liền nhau không có dấu phân cách ngôn ngữ rõ ràng
+    # CJK language codes — context prepend is ineffective for these because the
+    # tokenizer merges both sentences with no clear language boundary marker
     CJK_LANGS = {"jpn_Jpan", "zho_Hans", "zho_Hant", "kor_Hang"}
 
     def do_translate(text: str, src_lang: str, tgt_lang: str,
                      context_src: str = "", beam_size: int = 4) -> str:
-        # Context chỉ hiệu quả với Latin source (EN, VI, FR, ...)
-        # CJK: tắt context — ghép 2 câu Nhật/Trung liền làm model nhầm
+        # Context is only effective for Latin-script sources (EN, VI, FR, ...)
+        # CJK: disable context — concatenating two Japanese/Chinese sentences confuses the model
         if context_src and src_lang not in CJK_LANGS:
             ctx = context_src[-60:] if len(context_src) > 60 else context_src
             full_text = ctx + " " + text
@@ -99,7 +99,7 @@ def main():
             full_text = text
 
         tokens = sp.Encode(full_text, out_type=str)
-        # NLLB max input = 512 tokens — truncate nếu cần
+        # NLLB max input = 512 tokens — truncate if needed
         if len(tokens) > 500:
             tokens = tokens[-500:]
         input_tokens = [src_lang] + tokens + ["</s>"]

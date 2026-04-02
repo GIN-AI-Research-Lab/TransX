@@ -22,10 +22,10 @@ const defaults = {
   minSpeechMs:       500,             // min speech content before silence flush triggers
 
   // ── Whisper STT ───────────────────────────────────────────────────
-  whisperEndpoint:   'http://127.0.0.1:8080',  // dùng IP trực tiếp, tránh Node.js resolve localhost → IPv6
+  whisperEndpoint:   'http://127.0.0.1:8080',  // use IP directly to avoid Node.js resolving localhost as IPv6
   whisperTimeout:    30000,
   whisperModel:      'base',                   // tiny | base | small | medium
-  whisperLanguage:   'auto',                   // ISO code hoặc 'auto'
+  whisperLanguage:   'auto',                   // ISO language code or 'auto'
 
   // ── Translation ─────────────────────────────────────────────────
   translateEnabled:  true,

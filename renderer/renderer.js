@@ -4,8 +4,8 @@
  * Communicates with main process exclusively through window.electron
  * (the contextBridge API defined in preload.js).
  *
- * Audio capture dùng RendererAudioCapture (Web Audio API) — không cần ffmpeg.
- * audioCapture.js được load trước script này trong index.html.
+ * Audio capture uses RendererAudioCapture (Web Audio API) — no ffmpeg required.
+ * audioCapture.js is loaded before this script in index.html.
  */
 
 'use strict';
@@ -34,18 +34,18 @@ let running      = false;
 let clickThrough = false;
 /** @type {RendererAudioCapture|null} */
 let audioCapture = null;
-let segments     = [];           // [{ id, el, transEl }] các segment đã hiển thị
-let _liveEl      = null;         // segment đang ghi live (typing)
-let _liveOrigEl  = null;         // .seg-orig trong live segment
-const _pendingTrans = new Map(); // id → transEl — đang chờ dịch
-const MAX_SEG    = 200;          // giữ tối đa 200 segment trong DOM
+let segments     = [];           // [{ id, el, transEl }] all displayed segments
+let _liveEl      = null;         // currently recording live segment (typing)
+let _liveOrigEl  = null;         // .seg-orig element inside the live segment
+const _pendingTrans = new Map(); // id → transEl — awaiting translation
+const MAX_SEG    = 200;          // keep at most 200 segments in the DOM
 
-// Auto-scroll chỉ khi user đang ở cuối (không kéo xuống khi đang scroll lên xem lại)
+// Auto-scroll only when already at the bottom (don't force-scroll while user is reviewing history)
 function _isAtBottom() {
   return segContainer.scrollHeight - segContainer.scrollTop - segContainer.clientHeight < 80;
 }
 function _scrollToBottom() {
-  // Dùng rAF để scroll sau khi DOM đã re-layout (đặc biệt khi text dịch cập nhật in-place)
+  // Use rAF to scroll after DOM re-layout (especially when translated text updates in-place)
   const atBottom = _isAtBottom();
   requestAnimationFrame(() => {
     if (atBottom) segContainer.scrollTop = segContainer.scrollHeight;
@@ -65,26 +65,26 @@ function setRunning(r) {
     if (_liveEl) { _liveEl.remove(); _liveEl = null; _liveOrigEl = null; }
     _pendingTrans.clear();
     pendingSegEl.classList.add('hidden');
-    statusMsg.textContent = 'Đang nghe…';
+    statusMsg.textContent = 'Listening…';
   } else {
-    statusMsg.textContent = 'Nhấn ▶ để bắt đầu';
+    statusMsg.textContent = 'Press ▶ to start';
   }
 }
 
 function setStage(stage) {
   if (stage === 'stt') {
     dot.className = 'dot dot--stt';
-    statusMsg.textContent = 'Đang nhận dạng…';
+    statusMsg.textContent = 'Recognising…';
     spin.classList.remove('hidden');
   } else if (stage === 'translation') {
     dot.className = 'dot dot--translate';
-    statusMsg.textContent = 'Đang dịch…';
+    statusMsg.textContent = 'Translating…';
     spin.classList.remove('hidden');
   } else {
     spin.classList.add('hidden');
     if (running) {
       dot.className = 'dot dot--running';
-      statusMsg.textContent = 'Đang nghe…';
+      statusMsg.textContent = 'Listening…';
     }
   }
 }
@@ -113,7 +113,7 @@ function addSegment({ id, timestamp, original, translated, pending = false }) {
   const el = document.createElement('div');
   el.className = 'segment' + (pending ? ' segment--pending' : '');
   const transHtml = pending
-    ? '&#x231B; Đang dịch…'
+    ? '&#x231B; Translating…'
     : (translated ? escHtml(translated) : '<em style="opacity:.35">—</em>');
   el.innerHTML =
     `<span class="seg-ts">${fmtTime(timestamp)}</span>` +
@@ -149,7 +149,7 @@ function stopAudioCapture() {
 async function handleToggle() {
   btnToggle.disabled = true;
   try {
-    // Nếu đang chạy → dừng
+    // If running → stop
     if (running) {
       stopAudioCapture();
       await ipc.invoke('pipeline:toggle');
@@ -157,25 +157,25 @@ async function handleToggle() {
       return;
     }
 
-    // Bắt đầu: gọi toggle — bên trong đã ping whisper, nếu fail sẽ emit error
-    statusMsg.textContent = 'Đang kết nối…';
+    // Start: invoke toggle — it will ping whisper internally; on failure it emits an error
+    statusMsg.textContent = 'Connecting…';
     const res = await ipc.invoke('pipeline:toggle');
 
     if (res.running) {
       setRunning(true);
       try {
-        statusMsg.textContent = 'Đang mở audio…';
+        statusMsg.textContent = 'Opening audio…';
         await startAudioCapture();
         clearError();
       } catch (e) {
-        // Audio thất bại → dừng pipeline
+        // Audio failed → stop pipeline
         await ipc.invoke('pipeline:toggle');
         setRunning(false);
-        showError('Không mở được audio: ' + e.message);
+        showError('Failed to open audio: ' + e.message);
       }
     } else {
-      // pipeline.start() đã emit error (whipser chưa chạy hoặc lỗi khác)
-      // lỗi đã hiển thị qua sự kiện pipeline:error
+      // pipeline.start() already emitted an error (whisper not running or other failure)
+      // error already displayed via pipeline:error event
       setRunning(false);
     }
   } finally {
@@ -200,7 +200,7 @@ btnPass.addEventListener('click', async () => {
   clickThrough = !clickThrough;
   await ipc.invoke('overlay:setIgnoreMouse', clickThrough);
   btnPass.classList.toggle('cbtn--active', !clickThrough);
-  btnPass.title = clickThrough ? 'Click-through: ON — click tray để tương tác' : 'Click-through: OFF';
+  btnPass.title = clickThrough ? 'Click-through: ON — click tray to interact' : 'Click-through: OFF';
 });
 
 btnHide.addEventListener('click', () => window.close());
@@ -209,7 +209,7 @@ btnHide.addEventListener('click', () => window.close());
 ipc.on('pipeline:status', (d) => {
   if (!d.running) {
     stopAudioCapture();
-    // Xóa live segment chưa hoàn chỉnh (audio chưa qua Whisper)
+    // Remove incomplete live segment (audio not yet processed by Whisper)
     if (_liveEl) { _liveEl.remove(); _liveEl = null; _liveOrigEl = null; }
   }
   setRunning(d.running);
@@ -217,9 +217,9 @@ ipc.on('pipeline:status', (d) => {
 
 ipc.on('pipeline:processing', (d) => setStage(d.stage));
 
-// pipeline:listening — âm thanh đang vào, hiển thị bong bóng "..."
+// pipeline:listening — audio is incoming, show a live "..." bubble
 ipc.on('pipeline:listening', ({ timestamp }) => {
-  if (_liveEl) return; // đã có bubble rồi, không tạo thêm
+  if (_liveEl) return; // bubble already exists, do not create another
   _liveEl = document.createElement('div');
   _liveEl.className = 'segment segment--live';
   _liveEl.innerHTML =
@@ -234,28 +234,28 @@ ipc.on('pipeline:listening', ({ timestamp }) => {
   _scrollToBottom();
 });
 
-// pipeline:transcript — chốt live segment thành pending dịch
+// pipeline:transcript — finalise live segment as pending translation
 ipc.on('pipeline:transcript', ({ text, timestamp, id }) => {
   if (_liveEl) {
-    // Nâng cấp live → pending
+    // Upgrade live segment → pending
     _liveEl.className = 'segment segment--pending';
     _liveOrigEl.innerHTML = escHtml(text);
     const transEl = _liveEl.querySelector('.seg-trans');
-    transEl.innerHTML = '⏳ Đang dịch…';
+    transEl.innerHTML = '⏳ Translating…';
     segments.push({ id, el: _liveEl, transEl });
     while (segments.length > MAX_SEG) segments.shift().el.remove();
     _pendingTrans.set(id, transEl);
     _liveEl = null;
     _liveOrigEl = null;
   } else {
-    // Không có live segment (audio rất ngắn, chưa kịp emit partial)
+    // No live segment (audio too short, partial event was not emitted in time)
     const transEl = addSegment({ id, timestamp, original: text, translated: null, pending: true });
     _pendingTrans.set(id, transEl);
   }
   clearError();
 });
 
-// pipeline:translation — cập nhật theo id
+// pipeline:translation — update segment by id
 ipc.on('pipeline:translation', ({ original, translated, timestamp, id }) => {
   const transEl = _pendingTrans.get(id);
   if (transEl) {
@@ -266,7 +266,7 @@ ipc.on('pipeline:translation', ({ original, translated, timestamp, id }) => {
     _pendingTrans.delete(id);
     _scrollToBottom();
   } else {
-    // Fallback: không tìm thấy segment theo id
+    // Fallback: segment not found by id
     addSegment({ id, timestamp, original, translated });
   }
   clearError();
@@ -352,11 +352,11 @@ $('sp-btn-save').addEventListener('click', async () => {
 });
 
 $('sp-btn-reset').addEventListener('click', async () => {
-  if (!confirm('Reset toàn bộ cài đặt về mặc định?\n(Vị trí overlay sẽ không bị ảnh hưởng)')) return;
+  if (!confirm('Reset all settings to defaults?\n(Overlay position will not be affected)')) return;
   await ipc.invoke('config:reset');
   await spLoad();
   const st = $('sp-save-status');
-  st.textContent = '↺ Đã reset';
+  st.textContent = '↺ Reset';
   st.classList.add('visible');
   setTimeout(() => { st.classList.remove('visible'); st.textContent = '✓ Saved'; }, 2500);
 });
@@ -366,7 +366,7 @@ $('sp-btn-list-capture').addEventListener('click', async () => {
   const wasHidden = sel.classList.contains('hidden');
   sel.classList.toggle('hidden');
   if (wasHidden) {
-    sel.innerHTML = '<option disabled>Đang lấy danh sách…</option>';
+    sel.innerHTML = '<option disabled>Loading devices…</option>';
     try {
       let devices = await navigator.mediaDevices.enumerateDevices();
       if (devices.filter(d => d.kind === 'audioinput').every(d => !d.label)) {
@@ -377,12 +377,12 @@ $('sp-btn-list-capture').addEventListener('click', async () => {
       const inputs = devices.filter(d => d.kind === 'audioinput');
       sel.innerHTML = inputs.length
         ? inputs.map(d => `<option value="${escHtml(d.label)}">${escHtml(d.label || `Mic (${d.deviceId.slice(0,8)}…)`)}</option>`).join('')
-        : '<option disabled>Không tìm thấy mic nào</option>';
+        : '<option disabled>No microphones found</option>';
       const cur = $('sp-audioInputDevice').value;
       const match = Array.from(sel.options).find(o => o.value === cur);
       if (match) sel.value = cur;
     } catch (e) {
-      sel.innerHTML = `<option disabled>Lỗi: ${escHtml(e.message)}</option>`;
+      sel.innerHTML = `<option disabled>Error: ${escHtml(e.message)}</option>`;
     }
   }
 });
@@ -395,7 +395,7 @@ $('sp-capture-select').addEventListener('change', () => {
 (async () => {
   const status = await ipc.invoke('pipeline:status');
   setRunning(status.running);
-  statusMsg.textContent = 'Nhấn ▶ để bắt đầu';
+  statusMsg.textContent = 'Press ▶ to start';
 })();
 
 
