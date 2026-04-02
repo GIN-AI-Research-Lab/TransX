@@ -152,43 +152,95 @@ def main():
 
     default_language = args.language
 
+    # ── Per-language transcription params ─────────────────────────────
+    #
+    # JP params: da xac nhan chay chinh xac — KHONG thay doi
+    #   - best_of=1        : du la nhanh, JP VAD chuc nang tot
+    #   - speech_pad_ms=200: JP utterance ngan, padding nho la du
+    #   - log_prob_threshold=-0.5 : nghiem khac hon de loc tap am JP
+    #   - no_speech_prob>0.45     : nguong loc segment JP (da kiem chung)
+    #   - compression_ratio>2.0   : nguong hallucination JP (da kiem chung)
+    #
+    # EN params: toi uu cho tieng Anh hoi thoai (loi noi lien tuc, am nhieu)
+    #   - best_of=2        : thu 2 path giai ma, chon tot hon khi audio nhieu
+    #   - speech_pad_ms=400: EN speaker pause ngan giua cau, pad nhieu hon trach cat chu
+    #   - log_prob_threshold=-1.0 : thoai mai hon vi EN am vi khong deu nhu JP
+    #   - no_speech_prob>0.6      : cao hon de giu lai cac doan speech co confidence thap
+    #   - compression_ratio>2.2   : cao hon vi EN co nhieu filler tu hop le
+
+    JP_PARAMS = dict(
+        beam_size=5,
+        best_of=1,
+        vad_filter=True,
+        vad_parameters=dict(
+            min_silence_duration_ms=500,
+            speech_pad_ms=200,
+        ),
+        condition_on_previous_text=False,
+        no_speech_threshold=0.4,
+        log_prob_threshold=-0.5,
+        compression_ratio_threshold=1.8,
+        repetition_penalty=1.2,
+    )
+    JP_SEG_NO_SPEECH_MAX     = 0.45
+    JP_SEG_COMPRESSION_MAX   = 2.0
+
+    # EN params: ap dung cach tiep can giong JP (ngat cau tai khoang nghi tu nhien).
+    #   - EN doc tu trai qua phai (SVO): nua cau dau da du nghia de dich
+    #     → co the flush som nhu JP, khong can doi sentence hoan chinh
+    #   - min_silence_duration_ms=500: giong JP, chop khoang nghi tu nhien
+    #   - speech_pad_ms=300          : lon hon JP mot chut vi EN co filler tu
+    #   - best_of=2                  : giu lai de tang chat luong audio nhieu
+    #   - log_prob_threshold=-1.0    : thoai mai hon do EN am vi khong deu nhu JP
+    #   - no_speech_prob>0.6         : cao hon JP de giu speech confidence thap
+    #   - compression_ratio>2.2      : cao hon JP vi EN co filler tu hop le
+
+    EN_PARAMS = dict(
+        beam_size=4,       # giam tu 5 xuong 4: tang toc ~20% chat luong van tot
+        best_of=1,         # giam tu 2 xuong 1: tang toc ~40%, du tot cho hoi thoai ro rang
+        vad_filter=True,
+        vad_parameters=dict(
+            min_silence_duration_ms=500,   # giong JP: cat tai khoang nghi tu nhien
+            speech_pad_ms=300,             # lon hon JP (200) mot chut cho EN
+        ),
+        condition_on_previous_text=False,
+        no_speech_threshold=0.4,
+        log_prob_threshold=-1.0,
+        compression_ratio_threshold=2.0,
+        repetition_penalty=1.2,
+    )
+    EN_SEG_NO_SPEECH_MAX     = 0.6
+    EN_SEG_COMPRESSION_MAX   = 2.2
+
     # ── Transcription function ─────────────────────────────────────────
     def do_transcribe(audio_bytes, language=None, initial_prompt=None, temperature=0.0):
         """Transcribe audio bytes (WAV format) and return text."""
-        # Write to temp file — faster-whisper needs a file path or numpy array
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
 
         try:
             lang = language or default_language or None
-            # Use beam_size=5 for accuracy, or 1 for speed
+
+            # Chon params theo ngon ngu nguon
+            is_ja = (lang == "ja")
+            params       = JP_PARAMS       if is_ja else EN_PARAMS
+            no_sp_max    = JP_SEG_NO_SPEECH_MAX   if is_ja else EN_SEG_NO_SPEECH_MAX
+            compress_max = JP_SEG_COMPRESSION_MAX if is_ja else EN_SEG_COMPRESSION_MAX
+
             segments, info = model.transcribe(
                 tmp_path,
                 language=lang,
                 initial_prompt=initial_prompt or None,
                 temperature=temperature,
-                beam_size=5,
-                best_of=1,
-                vad_filter=True,
-                vad_parameters=dict(
-                    min_silence_duration_ms=500,
-                    speech_pad_ms=200,
-                ),
-                condition_on_previous_text=False,
-                no_speech_threshold=0.4,
-                log_prob_threshold=-0.5,
-                compression_ratio_threshold=1.8,
-                repetition_penalty=1.2,
+                **params,
             )
-            # Collect all segment texts with per-segment hallucination filter (Point 5)
+
             texts = []
             for seg in segments:
-                # Skip silence segments: high no_speech_prob = Whisper not confident there's speech
-                if seg.no_speech_prob > 0.45:
+                if seg.no_speech_prob > no_sp_max:
                     continue
-                # Skip repetitive / hallucination segments: high compression = repeated tokens
-                if seg.compression_ratio > 2.0:
+                if seg.compression_ratio > compress_max:
                     continue
                 t = seg.text.strip()
                 if t:
