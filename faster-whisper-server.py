@@ -176,9 +176,10 @@ def main():
                     speech_pad_ms=200,
                 ),
                 condition_on_previous_text=False,
-                no_speech_threshold=0.6,
-                log_prob_threshold=-1.0,
-                compression_ratio_threshold=2.4,
+                no_speech_threshold=0.4,
+                log_prob_threshold=-0.5,
+                compression_ratio_threshold=1.8,
+                repetition_penalty=1.2,
             )
             # Collect all segment texts
             texts = []

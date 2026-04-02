@@ -135,6 +135,7 @@ function buildPipeline() {
   pipeline.on('listening',  (d) => overlayWin?.webContents.send('pipeline:listening',  d));
   pipeline.on('partial',    (d) => overlayWin?.webContents.send('pipeline:partial',    d));
   pipeline.on('transcript', (t) => overlayWin?.webContents.send('pipeline:transcript',  t));
+  pipeline.on('draft-translation', (d) => overlayWin?.webContents.send('pipeline:draft-translation', d));
   pipeline.on('translation', (d) => {
     overlayWin?.webContents.send('pipeline:translation', d);
   });
@@ -144,12 +145,12 @@ function buildPipeline() {
   });
 }
 
-async function togglePipeline() {
+async function togglePipeline(context) {
   if (!pipeline) buildPipeline();
   if (pipeline.isRunning) {
     pipeline.stop();
   } else {
-    await pipeline.start();
+    await pipeline.start(context);
   }
 }
 
@@ -193,8 +194,8 @@ function setupIPC() {
     return cfg;
   });
 
-  ipcMain.handle('pipeline:toggle', async () => {
-    await togglePipeline();
+  ipcMain.handle('pipeline:toggle', async (_e, context) => {
+    await togglePipeline(context || '');
     return { running: pipeline?.isRunning || false };
   });
 

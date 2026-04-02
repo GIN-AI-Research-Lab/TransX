@@ -167,6 +167,13 @@ body {
 
 .segment--live .seg-orig { color: rgba(255,255,255,0.60); }
 .segment--live .seg-trans { display: none; }
+.segment--live .seg-trans.seg-trans--draft { display: block; }
+
+.seg-trans--draft {
+  opacity: 0.55;
+  font-style: italic;
+  font-weight: 400;
+}
 
 .typing-cursor {
   display: inline-block;
@@ -196,6 +203,75 @@ body {
 @keyframes rotate { to { transform: rotate(360deg); } }
 
 .hidden { display: none !important; }
+
+/* ── Context modal ───────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+.modal-box {
+  background: rgba(22,22,28,0.97);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: 14px 16px;
+  width: min(90%, 380px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.modal-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.75);
+  letter-spacing: .5px;
+}
+#ctx-input {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 5px;
+  color: #ddd;
+  font-size: 12px;
+  padding: 8px;
+  resize: vertical;
+  min-height: 50px;
+  max-height: 120px;
+  font-family: inherit;
+  outline: none;
+}
+#ctx-input:focus {
+  border-color: rgba(76,175,80,0.5);
+}
+#ctx-input::placeholder { color: rgba(255,255,255,0.25); }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.modal-btn {
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  padding: 5px 14px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.modal-btn--cancel {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.55);
+}
+.modal-btn--cancel:hover { background: rgba(255,255,255,0.12); }
+.modal-btn--ok {
+  background: rgba(76,175,80,0.25);
+  color: #81c784;
+  border-color: rgba(76,175,80,0.45);
+}
+.modal-btn--ok:hover { background: rgba(76,175,80,0.4); }
 
 /* ── Settings dropdown panel ─────────────────────────────────────────── */
 #app { position: relative; }

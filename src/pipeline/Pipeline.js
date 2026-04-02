@@ -44,12 +44,21 @@ function fmtTime(ms) {
 // Match bất kỳ chuỗi nằm trong [...] hoặc (...) — bao gồm cả Unicode/tiếng Nhật
 const BLANK_PATTERN  = /^\s*\[[^\[\]]+\]\s*$|^\s*\([^()]+\)\s*$/;
 
+// Detect repetition: same short word/phrase repeated 3+ times
+// Matches patterns like "はい。はい。はい" or "yes yes yes" or "ok ok ok ok"
+// Catches 2+ repetitions (not just 3+)
+const REPETITION_PATTERN = /^(.{1,12})[.。、,\s]+\1([.。、,\s]+\1)*[.。、,\s]*$/;
+
 // Whisper hallucination phrases — produced when audio has no real speech
 // (music, silence, noise). Expand this list as needed.
 const HALLUCINATION_EXACT = new Set([
-  // Japanese
+  // Japanese — filler sounds & common hallucinations
   '音楽', '(音楽)', '[音楽]', '字幕', 'ご視聴ありがとうございました', 'ご覧ありがとうございました',
   'ご視聴ありがとうございました。', '字幕制作', '反調',
+  'はい', 'はい。', 'うん', 'うん。', 'えー', 'えーと', 'あー',
+  'さあ', 'さあ。', 'さあ、', 'ほら', 'ほら。', 'ほら、', 'ねえ', 'ねえ。',
+  'あのう', 'あのう、', 'あの', 'まあ', 'まあ。', 'ようし',
+  'なるほど', 'なるほど。',
   // English
   'thank you for watching', 'thanks for watching', 'subtitles by', '[music]', '[ music ]',
   '(music)', '[applause]', '(applause)', '[laughter]', '(laughter)',
@@ -64,6 +73,8 @@ function _isNoise(text) {
   if (!t || t.length < MIN_CHARS) return true;
   if (BLANK_PATTERN.test(t)) return true;
   if (HALLUCINATION_EXACT.has(t.toLowerCase()) || HALLUCINATION_EXACT.has(t)) return true;
+  // Detect repetitive text like "はい。はい。はい。はい"
+  if (REPETITION_PATTERN.test(t)) return true;
   return false;
 }
 
@@ -93,19 +104,22 @@ function _srcToInitialPrompt(src) {
 // Near-realtime: ngắn chunk, flush nhanh → gửi Whisper sớm nhất có thể
 const LANG_PRESETS = {
   ja: {
-    chunkMaxMs:  5000,    // flush tối đa 5s (từ 10s)
-    silenceMs:   400,     // pause 400ms = flush (từ 600ms)
+    chunkMaxMs:  8000,    // dài hơn cho JP (động từ ở cuối câu)
+    silenceMs:   400,     // pause 400ms = flush
     minSpeechMs: 250,     // chấp nhận utterance ngắn
+    snapshotMs:  800,     // sliding window nhanh cho streaming
   },
   en: {
     chunkMaxMs:  5000,
-    silenceMs:   600,     // EN pause tự nhiên ~0.5–0.8s (từ 1000ms)
+    silenceMs:   600,     // EN pause tự nhiên ~0.5–0.8s
     minSpeechMs: 300,
+    snapshotMs:  1500,
   },
   vi: {
     chunkMaxMs:  5000,
     silenceMs:   600,
     minSpeechMs: 300,
+    snapshotMs:  1500,
   },
 };
 const DEFAULT_PRESET = LANG_PRESETS.en;
@@ -126,6 +140,7 @@ class Pipeline extends EventEmitter {
       silenceMs:   preset.silenceMs,
       silenceRMS:  cfg.silenceRMS || 200,
       minSpeechMs: preset.minSpeechMs,
+      snapshotMs:  preset.snapshotMs,
     });
     this.whisper    = new WhisperClient({
       ...cfg,
@@ -137,6 +152,7 @@ class Pipeline extends EventEmitter {
     this._nllbOnnx  = null;
     this._nllbCt2   = new NLLBClient(cfg);
     this.translator = null;
+    this._draftBusy = false;     // guard against concurrent draft translations
 
     this.isRunning    = false;
     this._queue       = [];      // full audio chunks waiting for STT
@@ -153,8 +169,19 @@ class Pipeline extends EventEmitter {
   }
 
   // ── Start / Stop ──────────────────────────────────────────────────
-  async start() {
+  async start(userContext) {
     if (this.isRunning) return;
+
+    // Store user context for initial prompt enrichment
+    this._userContext = (userContext || '').trim();
+    if (this._userContext) {
+      // Append user context to whisper initial prompt for better accuracy
+      const basePrompt = _srcToInitialPrompt(this.cfg.sourceLanguage);
+      this.whisper.initialPrompt = basePrompt
+        ? `${basePrompt} ${this._userContext}`
+        : this._userContext;
+      console.log(`[pipeline] context: "${this._userContext}"`);
+    }
 
     // Kiểm tra Whisper server trước khi start
     const ok = await this.whisper.ping();
@@ -188,6 +215,10 @@ class Pipeline extends EventEmitter {
       if (!this._nllbOnnx) this._nllbOnnx = new NLLBTranslator(this.cfg);
       this.translator = this._nllbOnnx;
       console.log('[pipeline] translator: ONNX (CT2 not available)');
+    }
+
+    if (this._isJaSource()) {
+      console.log('[pipeline] Japanese: NLLB-CT2 direct JP→VI (no EN pivot)');
     }
 
     this.abuf.removeAllListeners('chunk');
@@ -260,6 +291,7 @@ class Pipeline extends EventEmitter {
       silenceMs:   preset.silenceMs,
       silenceRMS:  cfg.silenceRMS || 200,
       minSpeechMs: preset.minSpeechMs,
+      snapshotMs:  preset.snapshotMs,
     });
   }
 
@@ -272,9 +304,10 @@ class Pipeline extends EventEmitter {
     if (this._nllbOnnx) this._nllbOnnx.updateLanguage(cfg);
     this._nllbCt2.updateLanguage(cfg);
     // Update AudioBuffer timing for the new source language
-    this.abuf.maxMs      = preset.chunkMaxMs;
-    this.abuf.silenceMs  = preset.silenceMs;
+    this.abuf.maxMs       = preset.chunkMaxMs;
+    this.abuf.silenceMs   = preset.silenceMs;
     this.abuf.minSpeechMs = preset.minSpeechMs;
+    this.abuf.snapshotMs  = preset.snapshotMs;
   }
 
   // ── Internal: partial/interim STT (snapshot, non-blocking) ─────────
@@ -292,6 +325,10 @@ class Pipeline extends EventEmitter {
       if (t !== this._lastPartialText) {
         this._lastPartialText = t;
         this.emit('partial', { text: t, timestamp });
+        // Japanese: start draft NLLB translation concurrently on partial text
+        if (this._isJaSource() && t.length >= 3) {
+          this._startDraftTranslation(t, timestamp);
+        }
       }
     } catch {
       // Ignore partial STT errors — final chunk will retry
@@ -351,7 +388,15 @@ class Pipeline extends EventEmitter {
       this.emit('translation', { original: transcript, translated: '', timestamp, id });
       return;
     }
-    // Delay translation 500ms so user sees transcript first
+
+    // Japanese: NLLB direct JP→VI translation immediately (no delay, no EN pivot)
+    if (this._isJaSource()) {
+      this._transQueue.push({ transcript, timestamp, id, epoch: this._epoch });
+      this._drainTranslation();
+      return;
+    }
+
+    // Other languages: delay 500ms then NLLB translation
     const currentEpoch = this._epoch;
     setTimeout(() => {
       if (this._epoch !== currentEpoch) return;
@@ -398,15 +443,48 @@ class Pipeline extends EventEmitter {
     }
     if (this._epoch !== epoch) return;
     if (translated) {
-      this.emit('translation', { original: transcript, translated, timestamp, id });
+      const tr = translated.trim();
+      // Filter repetitive translation output (e.g. NLLB hallucination "thôi nào, thôi nào")
+      if (!_isNoise(tr) && !REPETITION_PATTERN.test(tr)) {
+        this.emit('translation', { original: transcript, translated: tr, timestamp, id });
+      }
     }
   }
 
   /** Tự động dùng pivot khi nguồn là CJK/Arabic và đích không phải English */
   _shouldPivot() {
     if (!this.translator) return false;
-    const PIVOT_SOURCES = new Set(['jpn_Jpan', 'zho_Hans', 'kor_Hang', 'tha_Thai', 'arb_Arab']);
+    // Japanese: dịch thẳng JP→VI, không cần pivot qua EN
+    if (this._isJaSource()) return false;
+    const PIVOT_SOURCES = new Set(['zho_Hans', 'kor_Hang', 'tha_Thai', 'arb_Arab']);
     return PIVOT_SOURCES.has(this.translator.srcCode) && this.translator.tgtCode !== 'eng_Latn';
+  }
+
+  // ── Japanese streaming helpers ─────────────────────────────────────────
+
+  /** Check if current source language is Japanese */
+  _isJaSource() {
+    return _srcToWhisperLang(this.cfg.sourceLanguage) === 'ja';
+  }
+
+  /**
+   * Draft translation on partial Japanese text using NLLB-CT2.
+   * Fires-and-forgets; skips if a draft is already in-flight.
+   */
+  _startDraftTranslation(text, timestamp) {
+    if (this._draftBusy || !this.translator) return;
+    this._draftBusy = true;
+    const epoch = this._epoch;
+    this.translator.translateRaw(
+      text, 'jpn_Jpan', this.translator.tgtCode,
+    ).then((translated) => {
+      if (this._epoch !== epoch || !translated) return;
+      this.emit('draft-translation', { text: translated.trim(), timestamp });
+    }).catch(() => {
+      // Draft failed — ignore silently, final translation will handle it
+    }).finally(() => {
+      this._draftBusy = false;
+    });
   }
 
 }

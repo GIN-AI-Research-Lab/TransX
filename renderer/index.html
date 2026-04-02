@@ -148,6 +148,19 @@
       <span id="spin" class="spin hidden">⟳</span>
     </div>
 
+    <!-- ── Context modal ─────────────────────────────────────────── -->
+    <div id="context-modal" class="modal-overlay hidden">
+      <div class="modal-box">
+        <div class="modal-title" data-i18n="ctxTitle">Translation context</div>
+        <textarea id="ctx-input" rows="3" data-i18n-placeholder="ctxPlaceholder"
+          placeholder="Describe the topic being discussed (optional)…"></textarea>
+        <div class="modal-actions">
+          <button id="ctx-cancel" class="modal-btn modal-btn--cancel" data-i18n="ctxCancel">Cancel</button>
+          <button id="ctx-ok" class="modal-btn modal-btn--ok" data-i18n="ctxOk">OK — Start</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script src="audioCapture.js"></script>

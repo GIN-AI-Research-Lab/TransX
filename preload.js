@@ -30,6 +30,7 @@ const LISTEN_CHANNELS = new Set([
   'pipeline:partial',
   'pipeline:transcript',
   'pipeline:translation',
+  'pipeline:draft-translation',
   'pipeline:error',
 ]);
 

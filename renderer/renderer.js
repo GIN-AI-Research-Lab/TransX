@@ -88,6 +88,10 @@ const I18N = {
     devError:            'Error: ',
     pendingTrans:        '⟳ Translating…',
     segTranslating:      '⏳ Translating…',
+    ctxTitle:            'Translation context',
+    ctxPlaceholder:      'Describe the topic being discussed (optional)…',
+    ctxCancel:           'Cancel',
+    ctxOk:               'OK — Start',
   },
   vi: {
     statusReady:         'Nhấn ▶ để bắt đầu',
@@ -133,6 +137,10 @@ const I18N = {
     devError:            'Lỗi: ',
     pendingTrans:        '⟳ Đang dịch…',
     segTranslating:      '⏳ Đang dịch…',
+    ctxTitle:            'Ngữ cảnh dịch thuật',
+    ctxPlaceholder:      'Mô tả chủ đề đang nói (không bắt buộc)…',
+    ctxCancel:           'Hủy',
+    ctxOk:               'OK — Bắt đầu',
   },
   ja: {
     statusReady:         '▶ を押して開始',
@@ -178,6 +186,10 @@ const I18N = {
     devError:            'エラー: ',
     pendingTrans:        '⟳ 翻訳中…',
     segTranslating:      '⏳ 翻訳中…',
+    ctxTitle:            '翻訳コンテキスト',
+    ctxPlaceholder:      '話題の内容を入力（任意）…',
+    ctxCancel:           'キャンセル',
+    ctxOk:               'OK — 開始',
   },
 };
 
@@ -317,21 +329,60 @@ function stopAudioCapture() {
   audioCapture = null;
 }
 
+// ── Context modal ─────────────────────────────────────────────────────────
+const ctxModal  = $('context-modal');
+const ctxInput  = $('ctx-input');
+const ctxOk     = $('ctx-ok');
+const ctxCancel = $('ctx-cancel');
+
+function showContextModal() {
+  return new Promise((resolve) => {
+    ctxInput.value = '';
+    ctxModal.classList.remove('hidden');
+    ctxInput.focus();
+
+    const cleanup = () => {
+      ctxModal.classList.add('hidden');
+      ctxOk.removeEventListener('click', onOk);
+      ctxCancel.removeEventListener('click', onCancel);
+      ctxInput.removeEventListener('keydown', onKey);
+    };
+    const onOk = () => { cleanup(); resolve(ctxInput.value.trim()); };
+    const onCancel = () => { cleanup(); resolve(null); };
+    const onKey = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onOk(); }
+      if (e.key === 'Escape') onCancel();
+    };
+
+    ctxOk.addEventListener('click', onOk);
+    ctxCancel.addEventListener('click', onCancel);
+    ctxInput.addEventListener('keydown', onKey);
+  });
+}
+
 // ── Toggle Pipeline + Audio ───────────────────────────────────────────────
 async function handleToggle() {
-  btnToggle.disabled = true;
-  try {
-    // If running → stop
-    if (running) {
+  // If running → stop immediately
+  if (running) {
+    btnToggle.disabled = true;
+    try {
       stopAudioCapture();
       await ipc.invoke('pipeline:toggle');
       setRunning(false);
-      return;
+    } finally {
+      btnToggle.disabled = false;
     }
+    return;
+  }
 
-    // Start: invoke toggle — it will ping whisper internally; on failure it emits an error
+  // Show context modal before starting
+  const context = await showContextModal();
+  if (context === null) return; // user cancelled
+
+  btnToggle.disabled = true;
+  try {
     statusMsg.textContent = t('statusConnecting');
-    const res = await ipc.invoke('pipeline:toggle');
+    const res = await ipc.invoke('pipeline:toggle', context || '');
 
     if (res.running) {
       setRunning(true);
@@ -346,8 +397,6 @@ async function handleToggle() {
         showError(t('statusErrAudio') + e.message);
       }
     } else {
-      // pipeline.start() already emitted an error (whisper not running or other failure)
-      // error already displayed via pipeline:error event
       setRunning(false);
     }
   } finally {
@@ -413,6 +462,15 @@ ipc.on('pipeline:partial', ({ text }) => {
   _scrollToBottom();
 });
 
+// pipeline:draft-translation — streaming draft translation for live segment (Japanese LLM)
+ipc.on('pipeline:draft-translation', ({ text }) => {
+  if (!_liveEl) return;
+  const transEl = _liveEl.querySelector('.seg-trans');
+  transEl.innerHTML = escHtml(text);
+  transEl.classList.add('seg-trans--draft');
+  _scrollToBottom();
+});
+
 // pipeline:transcript — finalise live segment as pending translation
 ipc.on('pipeline:transcript', ({ text, timestamp, id }) => {
   if (_liveEl) {
@@ -434,17 +492,22 @@ ipc.on('pipeline:transcript', ({ text, timestamp, id }) => {
   clearError();
 });
 
-// pipeline:translation — update segment by id
-ipc.on('pipeline:translation', ({ original, translated, timestamp, id }) => {
+// pipeline:translation — update segment by id (supports draft/final)
+ipc.on('pipeline:translation', ({ original, translated, timestamp, id, draft }) => {
   const transEl = _pendingTrans.get(id);
   if (transEl) {
     transEl.innerHTML = translated
       ? escHtml(translated)
       : '<em style="opacity:.35">—</em>';
-    transEl.closest('.segment')?.classList.remove('segment--pending');
-    _pendingTrans.delete(id);
+    if (!draft) {
+      transEl.classList.remove('seg-trans--draft');
+      transEl.closest('.segment')?.classList.remove('segment--pending');
+      _pendingTrans.delete(id);
+    } else {
+      transEl.classList.add('seg-trans--draft');
+    }
     _scrollToBottom();
-  } else {
+  } else if (!draft) {
     // Fallback: segment not found by id
     addSegment({ id, timestamp, original, translated });
   }
