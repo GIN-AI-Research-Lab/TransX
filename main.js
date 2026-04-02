@@ -12,6 +12,8 @@ const {
 
 // ── Performance flags (before any window is created) ────────────────────────────
 app.disableHardwareAcceleration();   // overlay chỉ là text — không cần GPU, tiết kiệm RAM
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');  // tránh lỗi cache Access Denied
+app.commandLine.appendSwitch('disable-http-cache');             // tắt Chromium HTTP disk cache
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
 
 const path           = require('path');

@@ -13,7 +13,13 @@ Setup model (run once before starting):
 
 API:
     GET  /         → 200 "nllb-ct2-server OK"
-    POST /translate → {"text":"...", "src_lang":"eng_Latn", "tgt_lang":"vie_Latn"}
+    POST /translate → {
+                        "text":        "...",
+                        "src_lang":    "eng_Latn",
+                        "tgt_lang":    "vie_Latn",
+                        "context_src": "previous sentence (optional, Latin src only)",
+                        "beam_size":   4
+                      }
                    ← {"text":"..."}
 """
 
@@ -22,6 +28,12 @@ import json
 import os
 import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# Force UTF-8 stdout/stderr — prevents garbled output on Windows (CP1252 default)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 
 def main():
@@ -59,7 +71,7 @@ def main():
         sys.exit(1)
 
     # ── Load model ─────────────────────────────────────────────────────────
-    print(f"[nllb-ct2] Loading model from {ct2_dir}…", flush=True)
+    print(f"[nllb-ct2] Loading model from {ct2_dir}...", flush=True)
     translator = ctranslate2.Translator(
         ct2_dir,
         device="cpu",
@@ -72,14 +84,30 @@ def main():
     print("[nllb-ct2] Model ready.", flush=True)
 
     # ── Translation function ───────────────────────────────────────────────
-    def do_translate(text: str, src_lang: str, tgt_lang: str) -> str:
-        tokens        = sp.Encode(text, out_type=str)
-        input_tokens  = [src_lang] + tokens + ["</s>"]
-        result        = translator.translate_batch(
+    # CJK language codes — context prepend không có hiệu quả vì tokenizer
+    # nhập 2 câu liền nhau không có dấu phân cách ngôn ngữ rõ ràng
+    CJK_LANGS = {"jpn_Jpan", "zho_Hans", "zho_Hant", "kor_Hang"}
+
+    def do_translate(text: str, src_lang: str, tgt_lang: str,
+                     context_src: str = "", beam_size: int = 4) -> str:
+        # Context chỉ hiệu quả với Latin source (EN, VI, FR, ...)
+        # CJK: tắt context — ghép 2 câu Nhật/Trung liền làm model nhầm
+        if context_src and src_lang not in CJK_LANGS:
+            ctx = context_src[-60:] if len(context_src) > 60 else context_src
+            full_text = ctx + " " + text
+        else:
+            full_text = text
+
+        tokens = sp.Encode(full_text, out_type=str)
+        # NLLB max input = 512 tokens — truncate nếu cần
+        if len(tokens) > 500:
+            tokens = tokens[-500:]
+        input_tokens = [src_lang] + tokens + ["</s>"]
+        result = translator.translate_batch(
             [input_tokens],
             target_prefix=[[tgt_lang]],
             max_decoding_length=256,
-            beam_size=4,
+            beam_size=beam_size,
         )
         output_tokens = result[0].hypotheses[0][1:]  # skip leading tgt_lang token
         return sp.Decode(output_tokens)
@@ -114,13 +142,15 @@ def main():
             text     = body.get("text", "").strip()
             src_lang = body.get("src_lang", "eng_Latn")
             tgt_lang = body.get("tgt_lang", "vie_Latn")
+            context_src = body.get("context_src", "").strip()
+            beam_size   = int(body.get("beam_size", 4))
 
             if not text:
                 self._send_json(200, {"text": ""})
                 return
 
             try:
-                translated = do_translate(text, src_lang, tgt_lang)
+                translated = do_translate(text, src_lang, tgt_lang, context_src, beam_size)
                 self._send_json(200, {"text": translated})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})

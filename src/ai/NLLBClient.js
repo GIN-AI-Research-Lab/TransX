@@ -67,11 +67,19 @@ class NLLBClient {
     return this.translateRaw(text, this.srcCode, this.tgtCode);
   }
 
-  translateRaw(text, srcCode, tgtCode) {
-    const t = (text || '').trim();
-    if (!t) return Promise.resolve('');
+  translateRaw(text, srcCode, tgtCode, contextSrc, beamSize) {
+    const body = { text, src_lang: srcCode, tgt_lang: tgtCode };
+    if (contextSrc) body.context_src = contextSrc;
+    if (beamSize && beamSize !== 4) body.beam_size = beamSize;
+    return this._postTranslate(body);
+  }
 
-    const body = JSON.stringify({ text: t, src_lang: srcCode, tgt_lang: tgtCode });
+  _postTranslate(body) {
+    const t = (body.text || '').trim();
+    if (!t) return Promise.resolve('');
+    body.text = t;
+
+    const data = JSON.stringify(body);
 
     return new Promise((resolve, reject) => {
       const req = http.request(
@@ -82,7 +90,7 @@ class NLLBClient {
           method:  'POST',
           headers: {
             'Content-Type':   'application/json',
-            'Content-Length': Buffer.byteLength(body),
+            'Content-Length': Buffer.byteLength(data),
           },
           timeout: this._timeout,
         },
@@ -103,7 +111,7 @@ class NLLBClient {
 
       req.on('error',   reject);
       req.on('timeout', () => { req.destroy(); reject(new Error('[nllb-ct2] request timeout')); });
-      req.write(body);
+      req.write(data);
       req.end();
     });
   }
