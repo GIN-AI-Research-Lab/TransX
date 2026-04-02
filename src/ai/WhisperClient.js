@@ -1,12 +1,8 @@
 /**
  * src/ai/WhisperClient.js
  *
- * Sends a PCM buffer to a running whisper.cpp HTTP server
- * (default: http://localhost:8080/inference).
- *
- * Compatible with:
- *  - whisper.cpp  `whisper-server`  (POST /inference, multipart)
- *  - faster-whisper-server          (POST /v1/audio/transcriptions, multipart)
+ * Sends a PCM buffer to the faster-whisper HTTP server
+ * (default: http://127.0.0.1:8080/v1/audio/transcriptions).
  *
  * Uses Node 18+ built-in fetch + FormData + Blob — no extra deps.
  */
@@ -119,8 +115,7 @@ class WhisperClient {
     const timer = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      // Try whisper.cpp server endpoint first; fall back to OpenAI-compat
-      let url = `${this.endpoint}/inference`;
+      const url = `${this.endpoint}/v1/audio/transcriptions`;
 
       let resp;
       try {
@@ -140,30 +135,15 @@ class WhisperClient {
         ) {
           throw new Error(
             `Kh\u00f4ng k\u1ebft n\u1ed1i \u0111\u01b0\u1ee3c Whisper server t\u1ea1i ${this.endpoint}\n` +
-            `H\u00e3y ch\u1ea1y: .\\start-whisper.ps1`
+            `H\u00e3y ki\u1ec3m tra faster-whisper-server \u0111ang ch\u1ea1y.`
           );
         }
         throw fetchErr;
       }
 
-      if (!resp.ok) {
-        // Try OpenAI-compatible endpoint
-        if (resp.status === 404) {
-          const resp2 = await fetch(`${this.endpoint}/v1/audio/transcriptions`, {
-            method: 'POST',
-            body:   form,
-            signal: controller.signal,
-          });
-          if (!resp2.ok) throw new Error(`Whisper HTTP ${resp2.status}`);
-          const j2 = await resp2.json();
-          return (j2.text || '').trim();
-        }
-        throw new Error(`Whisper HTTP ${resp.status}`);
-      }
+      if (!resp.ok) throw new Error(`Whisper HTTP ${resp.status}`);
 
       const json = await resp.json();
-      // whisper.cpp returns { text: "..." }
-      // faster-whisper returns { text: "..." } as well
       return (json.text || '').trim();
     } finally {
       clearTimeout(timer);

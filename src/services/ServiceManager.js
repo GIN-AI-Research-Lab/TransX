@@ -1,8 +1,8 @@
 /**
  * src/services/ServiceManager.js
  *
- * Manages the whisper-server.exe child process (whisper.cpp, CPU).
- * Always uses the `tiny` model — fastest, ~75 MB, real-time on any CPU.
+ * Manages the faster-whisper Python server (CTranslate2 backend).
+ * Uses embedded Python + faster-whisper for 2-4x speedup over whisper.cpp.
  * Whisper language is derived automatically from cfg.sourceLanguage.
  */
 
@@ -46,7 +46,7 @@ class ServiceManager {
       : path.join(__dirname, '..', '..');
   }
 
-  get whisperExe() { return path.join(this._root, 'whisper-bin', 'whisper-server.exe'); }
+  get whisperServerScript() { return path.join(this._root, 'faster-whisper-server.py'); }
   get nllbModelDir() { return path.join(this._root, 'nllb-models'); }
   get nllbCt2ServerScript() { return path.join(this._root, 'nllb-ct2-server.py'); }
 
@@ -56,15 +56,9 @@ class ServiceManager {
     return fs.existsSync(embedded) ? embedded : 'python';
   }
 
-  get _modelFile() {
-    const base  = path.join(this._root, 'whisper-models', 'ggml-base.bin');
-    const small = path.join(this._root, 'whisper-models', 'ggml-small.bin');
-    const tiny  = path.join(this._root, 'whisper-models', 'ggml-tiny.bin');
-    // Prefer larger models for better JP/ZH recognition accuracy
-    if (fs.existsSync(small)) return small;
-    if (fs.existsSync(base))  return base;
-    if (fs.existsSync(tiny))  return tiny;
-    return null;
+  /** Return the whisper model size name based on what's available locally or config. */
+  _whisperModelSize(cfg) {
+    return cfg.whisperModel || 'base';
   }
 
   _portFromEndpoint(endpoint = 'http://127.0.0.1:8080') {
@@ -76,32 +70,36 @@ class ServiceManager {
     if (this._whisperProc) return Promise.resolve();
     this._stopping = false;
 
-    if (!fs.existsSync(this.whisperExe)) {
-      console.warn('[whisper] exe not found:', this.whisperExe);
+    const script = this.whisperServerScript;
+    if (!fs.existsSync(script)) {
+      console.warn('[faster-whisper] server script not found:', script);
       return Promise.resolve();
     }
 
-    const modelFile = this._modelFile;
-    if (!modelFile) {
-      console.error('[whisper] no model file found in whisper-models/');
-      return Promise.resolve();
-    }
-
-    const port     = this._portFromEndpoint(cfg.whisperEndpoint);
-    const language = sourceLangToWhisperLang(cfg.sourceLanguage);
-    return this._spawn(port, modelFile, language);
+    const port      = this._portFromEndpoint(cfg.whisperEndpoint);
+    const modelSize = this._whisperModelSize(cfg);
+    const language  = sourceLangToWhisperLang(cfg.sourceLanguage);
+    return this._spawnWhisper(port, modelSize, language);
   }
 
-  _spawn(port, modelFile, language) {
+  _spawnWhisper(port, modelSize, language) {
     return new Promise((resolve) => {
-      const args = ['-m', modelFile, '--host', '127.0.0.1', '--port', String(port)];
-      if (language) args.push('-l', language);
+      const script = this.whisperServerScript;
+      const args = [
+        script,
+        '--host', '127.0.0.1',
+        '--port', String(port),
+        '--model', modelSize,
+        '--device', 'cpu',
+        '--compute-type', 'int8',
+      ];
+      if (language) args.push('--language', language);
 
-      console.log('[whisper] spawning:', path.basename(modelFile), 'port', port, language ? `lang=${language}` : '');
+      console.log('[faster-whisper] spawning: model=%s port=%d lang=%s', modelSize, port, language || 'auto');
 
       const proc = spawn(
-        this.whisperExe, args,
-        { stdio: 'pipe', cwd: path.dirname(this.whisperExe) },
+        this._pythonExe, args,
+        { stdio: 'pipe', shell: false },
       );
       this._whisperProc = proc;
 
@@ -110,24 +108,26 @@ class ServiceManager {
 
       const onData = (d) => {
         const line = d.toString().trim();
-        if (line) console.log('[whisper]', line);
-        if (/listen/i.test(line)) { this._restartCount = 0; done(); }
+        if (line) console.log('[faster-whisper]', line);
+        if (/listening/i.test(line)) { this._restartCount = 0; done(); }
+        if (!resolved && /missing|not found|sys\.exit/i.test(line)) done();
       };
       proc.stdout.on('data', onData);
       proc.stderr.on('data', onData);
-      proc.on('error', (e) => { console.error('[whisper] error:', e.message); done(); });
+      proc.on('error', (e) => { console.error('[faster-whisper] error:', e.message); done(); });
       proc.on('exit', (code) => {
         this._whisperProc = null;
-        console.log('[whisper] exited', code);
+        console.log('[faster-whisper] exited', code);
         if (!this._stopping && this._restartCount < MAX_RESTARTS) {
           this._restartCount++;
           setTimeout(() => {
-            if (!this._stopping) this._spawn(port, modelFile, language).catch(() => {});
+            if (!this._stopping) this._spawnWhisper(port, modelSize, language).catch(() => {});
           }, RESTART_DELAY);
         }
       });
 
-      setTimeout(done, 10000);
+      // Model download + load can take 30-60s on first run
+      setTimeout(done, 120000);
     });
   }
 

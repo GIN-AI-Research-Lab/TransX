@@ -30,7 +30,6 @@ function fmtTime(ms) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-const CONTEXT_WINDOW = 5; // số câu giữ lại làm ngữ cảnh
 // Match bất kỳ chuỗi nằm trong [...] hoặc (...) — bao gồm cả Unicode/tiếng Nhật
 const BLANK_PATTERN  = /^\s*\[[^\[\]]+\]\s*$|^\s*\([^()]+\)\s*$/;
 
@@ -254,7 +253,6 @@ class Pipeline extends EventEmitter {
     this._startTime   = null;
     this._segId       = 0;
     this._epoch       = 0;       // tăng mỗi lần stop() — discard kết quả cũ
-    this._context     = [];
     this._recentTexts = [];      // dedup: last N complete transcripts
 
     // Gom mảnh transcript thành câu hoàn chỉnh trước khi dịch
@@ -267,7 +265,6 @@ class Pipeline extends EventEmitter {
         const id = ++this._segId;
         this.emit('transcript', { text, timestamp, id });
         if (!this.cfg.translateEnabled) {
-          this._addContext(text, '');
           this.emit('translation', { original: text, translated: '', timestamp, id });
           return;
         }
@@ -285,8 +282,8 @@ class Pipeline extends EventEmitter {
     const ok = await this.whisper.ping();
     if (!ok) {
       this.emit('error', new Error(
-        `Whisper server chưa chạy tại ${this.cfg.whisperEndpoint || 'http://localhost:8080'}\n` +
-        `Hãy mở terminal và chạy: .\\start-whisper.ps1`
+        `Faster-Whisper server chưa chạy tại ${this.cfg.whisperEndpoint || 'http://localhost:8080'}\n` +
+        `Hãy chờ server khởi động hoàn tất.`
       ));
       return;
     }
@@ -329,9 +326,8 @@ class Pipeline extends EventEmitter {
     });
 
     this._startTime = Date.now();
-    this._segId     = 0;
-    this._context   = [];
-    this.isRunning  = true;
+    this._segId    = 0;
+    this.isRunning = true;
     this.emit('started');
   }
 
@@ -475,23 +471,19 @@ class Pipeline extends EventEmitter {
     if (this._epoch !== epoch) return;
     this.emit('processing', { stage: 'translation' });
     let translated = '';
-    let pivotEnglish = '';
     try {
-      const ctx = this._getTranslationContext();
       if (this._shouldPivot()) {
         // Pivot: source → English → target
-        // Bước 1 (CJK→EN): beam cao hơn + không truyền context (CJK context làm model nhầm)
-        pivotEnglish = await this.translator.translateRaw(
+        const pivotEnglish = await this.translator.translateRaw(
           transcript, this.translator.srcCode, 'eng_Latn', '', 6,
         );
         if (!pivotEnglish || this._epoch !== epoch) return;
-        // Bước 2 (EN→VI): truyền English context câu trước — Latin với Latin hoạt động tốt
         translated = await this.translator.translateRaw(
-          pivotEnglish, 'eng_Latn', this.translator.tgtCode, ctx.pivotEnglish,
+          pivotEnglish, 'eng_Latn', this.translator.tgtCode,
         );
       } else {
         translated = await this.translator.translateRaw(
-          transcript, this.translator.srcCode, this.translator.tgtCode, ctx.original,
+          transcript, this.translator.srcCode, this.translator.tgtCode,
         );
       }
     } catch (err) {
@@ -499,19 +491,8 @@ class Pipeline extends EventEmitter {
     }
     if (this._epoch !== epoch) return;
     if (translated) {
-      this._addContext(transcript, translated, pivotEnglish);
       this.emit('translation', { original: transcript, translated, timestamp, id });
     }
-  }
-
-  /** Get last translation pair as context */
-  _getTranslationContext() {
-    const last = this._context.length > 0 ? this._context[this._context.length - 1] : null;
-    return {
-      original:     last?.original     || '',
-      translated:   last?.translated   || '',
-      pivotEnglish: last?.pivotEnglish || '',
-    };
   }
 
   /** Tự động dùng pivot khi nguồn là CJK/Arabic và đích không phải English */
@@ -521,11 +502,6 @@ class Pipeline extends EventEmitter {
     return PIVOT_SOURCES.has(this.translator.srcCode) && this.translator.tgtCode !== 'eng_Latn';
   }
 
-  /** Thêm vào cửa sổ ngữ cảnh, giữ tối đa CONTEXT_WINDOW câu */
-  _addContext(original, translated, pivotEnglish) {
-    this._context.push({ original, translated, pivotEnglish: pivotEnglish || '' });
-    if (this._context.length > CONTEXT_WINDOW) this._context.shift();
-  }
 }
 
 module.exports = Pipeline;

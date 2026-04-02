@@ -37,15 +37,15 @@
       "!**/*.md",
       "!**/*.ps1",
       "!scripts/**",
-      "!whisper-bin/**",
       "!whisper-models/**",
+      "faster-whisper-server.py",
       "!nllb-models/**"
     ],
     "extraResources": [
-      { "from": "whisper-bin",        "to": "whisper-bin"         },
-      { "from": "whisper-models",     "to": "whisper-models",
-        "filter": ["ggml-base.bin"] },
-      { "from": "nllb-ct2-server.py", "to": "nllb-ct2-server.py"  },
+      { "from": "faster-whisper-server.py", "to": "faster-whisper-server.py" },
+      { "from": "whisper-models",          "to": "whisper-models",
+        "filter": ["models--Systran--**"] },
+      { "from": "nllb-ct2-server.py",      "to": "nllb-ct2-server.py"       },
       { "from": "nllb-ct2-model",     "to": "nllb-ct2-model"      },
       { "from": "python-embed",       "to": "python-embed"        }
     ],
