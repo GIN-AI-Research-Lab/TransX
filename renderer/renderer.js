@@ -40,6 +40,178 @@ let _liveOrigEl  = null;         // .seg-orig element inside the live segment
 const _pendingTrans = new Map(); // id → transEl — awaiting translation
 const MAX_SEG    = 200;          // keep at most 200 segments in the DOM
 
+// ── i18n ───────────────────────────────────────────────────────────────────────
+let _uiLang = 'vi';
+
+const I18N = {
+  en: {
+    statusReady:         'Press ▶ to start',
+    statusListening:     'Listening…',
+    statusRecognising:   'Recognising…',
+    statusTranslating:   'Translating…',
+    statusConnecting:    'Connecting…',
+    statusOpenAudio:     'Opening audio…',
+    statusErrAudio:      'Failed to open audio: ',
+    titleClear:          'Clear translation',
+    titleSettings:       'Settings',
+    titleHide:           'Hide overlay',
+    titlePassOff:        'Click-through: OFF',
+    titlePassOn:         'Click-through: ON — click tray to interact',
+    sectionAudio:        '🎤 Audio',
+    sectionTranslation:  '🌐 Translation',
+    sectionOverlay:      '🖥 Overlay',
+    sectionApp:          '⚙ Application',
+    labelSource:         'Source',
+    labelMicrophone:     'Microphone',
+    phMicDefault:        'Leave blank for default',
+    titlePickList:       'Pick from list',
+    optMicro:            'Microphone (WASAPI)',
+    optSystem:           'System Audio / Loopback',
+    optBoth:             'Both — Mic + System',
+    labelSrcLang:        'Source language',
+    labelTgtLang:        'Target language',
+    labelFontSize:       'Font size',
+    labelOpacity:        'Opacity',
+    labelHotkey:         'Hotkey',
+    labelStartMin:       'Start minimized',
+    labelMaxChunk:       'Max chunk',
+    labelSilenceMs:      'Silence flush',
+    labelSilenceRms:     'Silence RMS',
+    labelUiLang:         'Interface language',
+    btnSave:             'Save & Apply',
+    btnReset:            '↺ Reset',
+    savedStatus:         '✓ Saved',
+    resetStatus:         '↺ Reset',
+    confirmReset:        'Reset all settings to defaults?\n(Overlay position will not be affected)',
+    devLoading:          'Loading devices…',
+    devNone:             'No microphones found',
+    devError:            'Error: ',
+    pendingTrans:        '⟳ Translating…',
+    segTranslating:      '⏳ Translating…',
+  },
+  vi: {
+    statusReady:         'Nhấn ▶ để bắt đầu',
+    statusListening:     'Đang nghe…',
+    statusRecognising:   'Đang nhận dạng…',
+    statusTranslating:   'Đang dịch…',
+    statusConnecting:    'Đang kết nối…',
+    statusOpenAudio:     'Đang mở audio…',
+    statusErrAudio:      'Không mở được audio: ',
+    titleClear:          'Xóa nội dung dịch',
+    titleSettings:       'Cài đặt',
+    titleHide:           'Ẩn overlay',
+    titlePassOff:        'Xuyên chuột: TẮt',
+    titlePassOn:         'Xuyên chuột: Bật — nhấn tray để tương tác',
+    sectionAudio:        '🎤 Âm thanh',
+    sectionTranslation:  '🌐 Dịch thuật',
+    sectionOverlay:      '🖥 Overlay',
+    sectionApp:          '⚙ Ứng dụng',
+    labelSource:         'Nguồn',
+    labelMicrophone:     'Microphone',
+    phMicDefault:        'Để trống = mặc định',
+    titlePickList:       'Chọn từ danh sách',
+    optMicro:            'Microphone (WASAPI)',
+    optSystem:           'Âm thanh hệ thống / Loopback',
+    optBoth:             'Cả hai — Mic + Hệ thống',
+    labelSrcLang:        'Ngôn ngữ nguồn',
+    labelTgtLang:        'Ngôn ngữ đích',
+    labelFontSize:       'Cỡ chữ',
+    labelOpacity:        'Độ mờ',
+    labelHotkey:         'Phím tắt',
+    labelStartMin:       'Khởi động thu nhỏ',
+    labelMaxChunk:       'Chunk tối đa',
+    labelSilenceMs:      'Khoảng lặng',
+    labelSilenceRms:     'Ngưỡng lặng RMS',
+    labelUiLang:         'Ngôn ngữ giao diện',
+    btnSave:             'Lưu & Áp dụng',
+    btnReset:            '↺ Đặt lại',
+    savedStatus:         '✓ Đã lưu',
+    resetStatus:         '↺ Đã đặt lại',
+    confirmReset:        'Đặt lại tất cả cài đặt về mặc định?\n(Vị trí overlay sẽ không bị ảnh hưởng)',
+    devLoading:          'Đang tải danh sách…',
+    devNone:             'Không tìm thấy mic nào',
+    devError:            'Lỗi: ',
+    pendingTrans:        '⟳ Đang dịch…',
+    segTranslating:      '⏳ Đang dịch…',
+  },
+  ja: {
+    statusReady:         '▶ を押して開始',
+    statusListening:     '音声入力中…',
+    statusRecognising:   '認識中…',
+    statusTranslating:   '翻訳中…',
+    statusConnecting:    '接続中…',
+    statusOpenAudio:     'オーディオを開いています…',
+    statusErrAudio:      'オーディオを開けません: ',
+    titleClear:          '翻訳内容をクリア',
+    titleSettings:       '設定',
+    titleHide:           'オーバーレイを隠す',
+    titlePassOff:        'クリックスルー: オフ',
+    titlePassOn:         'クリックスルー: オン — トレイをクリックして操作',
+    sectionAudio:        '🎤 オーディオ',
+    sectionTranslation:  '🌐 翻訳',
+    sectionOverlay:      '🖥 オーバーレイ',
+    sectionApp:          '⚙ アプリ設定',
+    labelSource:         'ソース',
+    labelMicrophone:     'マイク',
+    phMicDefault:        '空欄 = デフォルト',
+    titlePickList:       'リストから選択',
+    optMicro:            'マイク (WASAPI)',
+    optSystem:           'システムオーディオ / ループバック',
+    optBoth:             '両方 — マイク + システム',
+    labelSrcLang:        '入力言語',
+    labelTgtLang:        '出力言語',
+    labelFontSize:       'フォントサイズ',
+    labelOpacity:        '透明度',
+    labelHotkey:         'ホットキー',
+    labelStartMin:       '最小化で起動',
+    labelMaxChunk:       '最大チャンク',
+    labelSilenceMs:      '無音フラッシュ',
+    labelSilenceRms:     '無音 RMS 閾値',
+    labelUiLang:         '表示言語',
+    btnSave:             '保存して適用',
+    btnReset:            '↺ リセット',
+    savedStatus:         '✓ 保存済み',
+    resetStatus:         '↺ リセット済み',
+    confirmReset:        'すべての設定をデフォルトに戻しますか？\n(オーバーレイの位置は変更されません)',
+    devLoading:          'デバイスを読み込み中…',
+    devNone:             'マイクが見つかりません',
+    devError:            'エラー: ',
+    pendingTrans:        '⟳ 翻訳中…',
+    segTranslating:      '⏳ 翻訳中…',
+  },
+};
+
+function t(key) {
+  return (I18N[_uiLang] || I18N.vi)[key] ?? (I18N.en[key] ?? key);
+}
+
+function applyI18n(lang) {
+  _uiLang = lang || 'vi';
+  // Static text nodes
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  // title attributes
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => {
+    el.title = t(el.dataset.i18nTitle);
+  });
+  // placeholder attributes
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+    el.placeholder = t(el.dataset.i18nPlaceholder);
+  });
+  // audioSource select options (translated via JS, not HTML text)
+  const srcSel = document.getElementById('sp-audioSource');
+  if (srcSel && srcSel.options.length >= 3) {
+    srcSel.options[0].text = t('optMicro');
+    srcSel.options[1].text = t('optSystem');
+    srcSel.options[2].text = t('optBoth');
+  }
+  // btn-pass dynamic title depends on clickThrough state
+  btnPass.title = clickThrough ? t('titlePassOn') : t('titlePassOff');
+  // update status bar only when idle
+  if (!running) statusMsg.textContent = t('statusReady');
+}
+
 // Auto-scroll only when already at the bottom (don't force-scroll while user is reviewing history)
 function _isAtBottom() {
   return segContainer.scrollHeight - segContainer.scrollTop - segContainer.clientHeight < 80;
@@ -65,26 +237,26 @@ function setRunning(r) {
     if (_liveEl) { _liveEl.remove(); _liveEl = null; _liveOrigEl = null; }
     _pendingTrans.clear();
     pendingSegEl.classList.add('hidden');
-    statusMsg.textContent = 'Listening…';
+    statusMsg.textContent = t('statusListening');
   } else {
-    statusMsg.textContent = 'Press ▶ to start';
+    statusMsg.textContent = t('statusReady');
   }
 }
 
 function setStage(stage) {
   if (stage === 'stt') {
     dot.className = 'dot dot--stt';
-    statusMsg.textContent = 'Recognising…';
+    statusMsg.textContent = t('statusRecognising');
     spin.classList.remove('hidden');
   } else if (stage === 'translation') {
     dot.className = 'dot dot--translate';
-    statusMsg.textContent = 'Translating…';
+    statusMsg.textContent = t('statusTranslating');
     spin.classList.remove('hidden');
   } else {
     spin.classList.add('hidden');
     if (running) {
       dot.className = 'dot dot--running';
-      statusMsg.textContent = 'Listening…';
+      statusMsg.textContent = t('statusListening');
     }
   }
 }
@@ -113,7 +285,7 @@ function addSegment({ id, timestamp, original, translated, pending = false }) {
   const el = document.createElement('div');
   el.className = 'segment' + (pending ? ' segment--pending' : '');
   const transHtml = pending
-    ? '&#x231B; Translating…'
+    ? t('segTranslating')
     : (translated ? escHtml(translated) : '<em style="opacity:.35">—</em>');
   el.innerHTML =
     `<span class="seg-ts">${fmtTime(timestamp)}</span>` +
@@ -158,20 +330,20 @@ async function handleToggle() {
     }
 
     // Start: invoke toggle — it will ping whisper internally; on failure it emits an error
-    statusMsg.textContent = 'Connecting…';
+    statusMsg.textContent = t('statusConnecting');
     const res = await ipc.invoke('pipeline:toggle');
 
     if (res.running) {
       setRunning(true);
       try {
-        statusMsg.textContent = 'Opening audio…';
+        statusMsg.textContent = t('statusOpenAudio');
         await startAudioCapture();
         clearError();
       } catch (e) {
         // Audio failed → stop pipeline
         await ipc.invoke('pipeline:toggle');
         setRunning(false);
-        showError('Failed to open audio: ' + e.message);
+        showError(t('statusErrAudio') + e.message);
       }
     } else {
       // pipeline.start() already emitted an error (whisper not running or other failure)
@@ -241,7 +413,7 @@ ipc.on('pipeline:transcript', ({ text, timestamp, id }) => {
     _liveEl.className = 'segment segment--pending';
     _liveOrigEl.innerHTML = escHtml(text);
     const transEl = _liveEl.querySelector('.seg-trans');
-    transEl.innerHTML = '⏳ Translating…';
+    transEl.innerHTML = t('segTranslating');
     segments.push({ id, el: _liveEl, transEl });
     while (segments.length > MAX_SEG) segments.shift().el.remove();
     _pendingTrans.set(id, transEl);
@@ -296,6 +468,7 @@ function spFormSet(id, value) {
 
 async function spLoad() {
   const c = await ipc.invoke('config:get');
+  spFormSet('sp-uiLanguage',       c.uiLanguage       ?? 'vi');
   spFormSet('sp-audioSource',      c.audioSource      ?? 'microphone');
   spFormSet('sp-audioInputDevice', c.audioInputDevice ?? '');
   spFormSet('sp-sourceLanguage',   c.sourceLanguage   ?? 'English');
@@ -307,6 +480,7 @@ async function spLoad() {
   spFormSet('sp-chunkMaxMs',       c.chunkMaxMs       ?? 10000);
   spFormSet('sp-silenceMs',        c.silenceMs        ?? 1200);
   spFormSet('sp-silenceRMS',       c.silenceRMS        ?? 250);
+  applyI18n(c.uiLanguage ?? 'vi');
 }
 
 function spRead() {
@@ -315,6 +489,7 @@ function spRead() {
   return {
     audioSource:      gv('sp-audioSource'),
     audioInputDevice: (gv('sp-audioInputDevice') || '').trim(),
+    uiLanguage:       gv('sp-uiLanguage'),
     sourceLanguage:   gv('sp-sourceLanguage'),
     targetLanguage:   gv('sp-targetLanguage'),
     overlayFontSize:  parseInt(gv('sp-overlayFontSize'), 10),
@@ -347,18 +522,19 @@ document.addEventListener('click', (e) => {
 $('sp-btn-save').addEventListener('click', async () => {
   await ipc.invoke('config:save', spRead());
   const st = $('sp-save-status');
+  st.textContent = t('savedStatus');
   st.classList.add('visible');
   setTimeout(() => st.classList.remove('visible'), 2000);
 });
 
 $('sp-btn-reset').addEventListener('click', async () => {
-  if (!confirm('Reset all settings to defaults?\n(Overlay position will not be affected)')) return;
+  if (!confirm(t('confirmReset'))) return;
   await ipc.invoke('config:reset');
   await spLoad();
   const st = $('sp-save-status');
-  st.textContent = '↺ Reset';
+  st.textContent = t('resetStatus');
   st.classList.add('visible');
-  setTimeout(() => { st.classList.remove('visible'); st.textContent = '✓ Saved'; }, 2500);
+  setTimeout(() => { st.classList.remove('visible'); st.textContent = t('savedStatus'); }, 2500);
 });
 
 $('sp-btn-list-capture').addEventListener('click', async () => {
@@ -366,7 +542,7 @@ $('sp-btn-list-capture').addEventListener('click', async () => {
   const wasHidden = sel.classList.contains('hidden');
   sel.classList.toggle('hidden');
   if (wasHidden) {
-    sel.innerHTML = '<option disabled>Loading devices…</option>';
+    sel.innerHTML = `<option disabled>${t('devLoading')}</option>`;
     try {
       let devices = await navigator.mediaDevices.enumerateDevices();
       if (devices.filter(d => d.kind === 'audioinput').every(d => !d.label)) {
@@ -377,12 +553,12 @@ $('sp-btn-list-capture').addEventListener('click', async () => {
       const inputs = devices.filter(d => d.kind === 'audioinput');
       sel.innerHTML = inputs.length
         ? inputs.map(d => `<option value="${escHtml(d.label)}">${escHtml(d.label || `Mic (${d.deviceId.slice(0,8)}…)`)}</option>`).join('')
-        : '<option disabled>No microphones found</option>';
+        : `<option disabled>${t('devNone')}</option>`;
       const cur = $('sp-audioInputDevice').value;
       const match = Array.from(sel.options).find(o => o.value === cur);
       if (match) sel.value = cur;
     } catch (e) {
-      sel.innerHTML = `<option disabled>Error: ${escHtml(e.message)}</option>`;
+      sel.innerHTML = `<option disabled>${t('devError')}${escHtml(e.message)}</option>`;
     }
   }
 });
@@ -391,11 +567,18 @@ $('sp-capture-select').addEventListener('change', () => {
   $('sp-audioInputDevice').value = $('sp-capture-select').value;
 });
 
+document.getElementById('sp-uiLanguage').addEventListener('change', (e) => {
+  applyI18n(e.target.value);
+});
+
 // ── Bootstrap ─────────────────────────────────────────────────────────────
 (async () => {
-  const status = await ipc.invoke('pipeline:status');
+  const [status, cfg] = await Promise.all([
+    ipc.invoke('pipeline:status'),
+    ipc.invoke('config:get'),
+  ]);
+  applyI18n(cfg.uiLanguage || 'vi');
   setRunning(status.running);
-  statusMsg.textContent = 'Press ▶ to start';
 })();
 
 

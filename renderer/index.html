@@ -19,10 +19,10 @@
         <span id="dot" class="dot dot--idle" title="Status"></span>
 
         <button id="btn-toggle"   class="cbtn" title="Start / Stop (Ctrl+Shift+T)">▶</button>
-        <button id="btn-clear"    class="cbtn cbtn--clear" title="Clear translation">🗑</button>
-        <button id="btn-settings" class="cbtn" title="Settings">⚙</button>
+        <button id="btn-clear"    class="cbtn cbtn--clear" data-i18n-title="titleClear" title="Clear translation">🗑</button>
+        <button id="btn-settings" class="cbtn" data-i18n-title="titleSettings" title="Settings">⚙</button>
         <button id="btn-pass"     class="cbtn cbtn--active" title="Click-through: OFF">📌</button>
-        <button id="btn-hide"     class="cbtn" title="Hide overlay">—</button>
+        <button id="btn-hide"     class="cbtn" data-i18n-title="titleHide" title="Hide overlay">—</button>
       </div>
     </div>
 
@@ -31,10 +31,10 @@
       <div class="sp-body">
 
         <details class="sp-section" open>
-          <summary class="sp-section-title">🎤 Audio</summary>
+          <summary class="sp-section-title" data-i18n="sectionAudio">🎤 Audio</summary>
           <div class="sp-section-body">
             <div class="sp-field">
-              <label for="sp-audioSource">Source</label>
+              <label for="sp-audioSource" data-i18n="labelSource">Source</label>
               <select id="sp-audioSource">
                 <option value="microphone">Microphone (WASAPI)</option>
                 <option value="system">System Audio / Loopback</option>
@@ -42,10 +42,10 @@
               </select>
             </div>
             <div class="sp-field">
-              <label for="sp-audioInputDevice">Microphone</label>
+              <label for="sp-audioInputDevice" data-i18n="labelMicrophone">Microphone</label>
               <div class="sp-row">
-                <input id="sp-audioInputDevice" type="text" placeholder="Leave blank for default">
-                <button id="sp-btn-list-capture" title="Pick from list">▾</button>
+                <input id="sp-audioInputDevice" type="text" data-i18n-placeholder="phMicDefault" placeholder="Leave blank for default">
+                <button id="sp-btn-list-capture" data-i18n-title="titlePickList" title="Pick from list">▾</button>
               </div>
               <select id="sp-capture-select" class="sp-device-select hidden" size="4"></select>
             </div>
@@ -53,10 +53,10 @@
         </details>
 
         <details class="sp-section" open>
-          <summary class="sp-section-title">🌐 Translation</summary>
+          <summary class="sp-section-title" data-i18n="sectionTranslation">🌐 Translation</summary>
           <div class="sp-section-body">
             <div class="sp-field">
-              <label for="sp-sourceLanguage">Source language</label>
+              <label for="sp-sourceLanguage" data-i18n="labelSrcLang">Source language</label>
               <select id="sp-sourceLanguage">
                 <option value="English">English</option>
                 <option value="Japanese">Japanese — 日本語</option>
@@ -64,7 +64,7 @@
               </select>
             </div>
             <div class="sp-field">
-              <label for="sp-targetLanguage">Target language</label>
+              <label for="sp-targetLanguage" data-i18n="labelTgtLang">Target language</label>
               <select id="sp-targetLanguage">
                 <option value="Vietnamese">Vietnamese</option>
                 <option value="English">English</option>
@@ -75,40 +75,48 @@
         </details>
 
         <details class="sp-section">
-          <summary class="sp-section-title">🖥 Overlay</summary>
+          <summary class="sp-section-title" data-i18n="sectionOverlay">🖥 Overlay</summary>
           <div class="sp-section-body">
             <div class="sp-field">
-              <label>Font size — <span id="sp-overlayFontSize-val">16</span>px</label>
+              <label><span data-i18n="labelFontSize">Font size</span> — <span id="sp-overlayFontSize-val">16</span>px</label>
               <input type="range" id="sp-overlayFontSize" min="10" max="28" step="1" value="16">
             </div>
             <div class="sp-field">
-              <label>Opacity — <span id="sp-overlayOpacity-val">1.0</span></label>
+              <label><span data-i18n="labelOpacity">Opacity</span> — <span id="sp-overlayOpacity-val">1.0</span></label>
               <input type="range" id="sp-overlayOpacity" min="0.2" max="1.0" step="0.05" value="1.0">
             </div>
           </div>
         </details>
 
         <details class="sp-section">
-          <summary class="sp-section-title">⚙ Application</summary>
+          <summary class="sp-section-title" data-i18n="sectionApp">⚙ Application</summary>
           <div class="sp-section-body">
             <div class="sp-field">
-              <label for="sp-hotkey">Hotkey</label>
+              <label for="sp-uiLanguage" data-i18n="labelUiLang">Interface language</label>
+              <select id="sp-uiLanguage">
+                <option value="vi">Tiếng Việt</option>
+                <option value="en">English</option>
+                <option value="ja">日本語</option>
+              </select>
+            </div>
+            <div class="sp-field">
+              <label for="sp-hotkey" data-i18n="labelHotkey">Hotkey</label>
               <input id="sp-hotkey" type="text" placeholder="Ctrl+Shift+T">
             </div>
             <div class="sp-toggle">
               <input type="checkbox" id="sp-startMinimized">
-              <label for="sp-startMinimized">Start minimized</label>
+              <label for="sp-startMinimized" data-i18n="labelStartMin">Start minimized</label>
             </div>
             <div class="sp-field">
-              <label>Max chunk — <span id="sp-chunkMaxMs-val">10000</span>ms</label>
+              <label><span data-i18n="labelMaxChunk">Max chunk</span> — <span id="sp-chunkMaxMs-val">10000</span>ms</label>
               <input type="range" id="sp-chunkMaxMs" min="2000" max="20000" step="500" value="10000">
             </div>
             <div class="sp-field">
-              <label>Silence flush — <span id="sp-silenceMs-val">1200</span>ms</label>
+              <label><span data-i18n="labelSilenceMs">Silence flush</span> — <span id="sp-silenceMs-val">1200</span>ms</label>
               <input type="range" id="sp-silenceMs" min="300" max="3000" step="100" value="1200">
             </div>
             <div class="sp-field">
-              <label>Silence RMS — <span id="sp-silenceRMS-val">250</span></label>
+              <label><span data-i18n="labelSilenceRms">Silence RMS</span> — <span id="sp-silenceRMS-val">250</span></label>
               <input type="range" id="sp-silenceRMS" min="50" max="800" step="10" value="250">
             </div>
           </div>
@@ -116,9 +124,9 @@
 
       </div>
       <div class="sp-footer">
-        <span id="sp-save-status">✓ Saved</span>
-        <button id="sp-btn-reset" class="sp-btn-danger">↺ Reset</button>
-        <button id="sp-btn-save" class="sp-btn-primary">Save &amp; Apply</button>
+        <span id="sp-save-status" data-i18n="savedStatus">✓ Saved</span>
+        <button id="sp-btn-reset" class="sp-btn-danger" data-i18n="btnReset">↺ Reset</button>
+        <button id="sp-btn-save" class="sp-btn-primary" data-i18n="btnSave">Save &amp; Apply</button>
       </div>
     </div>
 
@@ -129,7 +137,7 @@
         <span class="seg-ts" id="pending-ts"></span>
         <div class="seg-body">
           <div class="seg-orig" id="pending-orig"></div>
-          <div class="seg-trans" id="pending-trans">⟳ Translating…</div>
+          <div class="seg-trans" id="pending-trans" data-i18n="pendingTrans">⟳ Translating…</div>
         </div>
       </div>
     </div>

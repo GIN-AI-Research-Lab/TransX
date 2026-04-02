@@ -319,7 +319,7 @@ details[open] > .sp-section-title::after { transform: rotate(90deg); }
 .sp-btn-danger {
   background: transparent; color: #f38ba8;
   border: 1px solid rgba(243,139,168,0.55); border-radius: 5px; padding: 5px 12px;
-  font-size: 12px; cursor: pointer; margin-right: auto;
+  font-size: 12px; cursor: pointer;
 }
 .sp-btn-danger:hover { background: rgba(243,139,168,.15); border-color: #f38ba8; }
 

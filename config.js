@@ -51,6 +51,7 @@ const defaults = {
   hotkey:          'Ctrl+Shift+T',
   startMinimized:  false,
   maxHistoryItems: 50,
+  uiLanguage:      'vi',             // 'vi' | 'en' | 'ja'
 
   // ── NLLB CTranslate2 server (optional, ~600 MB RAM, 2-3× faster) ─
   nllbEndpoint:    'http://127.0.0.1:8081',
