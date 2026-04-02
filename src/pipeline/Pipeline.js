@@ -78,6 +78,43 @@ function _isNoise(text) {
   return false;
 }
 
+// ── Aizuchi bypass cache (Point 3) ─────────────────────────────────────────
+// Quick-lookup for common Japanese fillers/acknowledgments — bypasses NLLB entirely.
+// Keys are trimmed text exactly as Whisper would output them.
+const AIZUCHI_CACHE = new Map([
+  // Consent / acknowledgment
+  ['はい、そうです', 'Vâng, đúng vậy'],        ['はい、そうです。', 'Vâng, đúng vậy'],
+  ['そうですね', 'Vậy nhỉ'],              ['そうですね。', 'Vậy nhỉ'],
+  ['そうですよね', 'Đúng vậy nhỉ'],           ['そうですよね。', 'Đúng vậy nhỉ'],
+  ['そうですか', 'Vậy à'],               ['そうですか。', 'Vậy à'],
+  ['そうか', 'Vậy à'],                   ['そうか。', 'Vậy à'],
+  ['そうだね', 'Hmm, đúng vậy'],           ['そうだな', 'Hmm, đúng vậy nhỉ'],
+  // Comprehension
+  ['なるほどです', 'Ra là vậy'],            ['なるほどですね', 'Ra là vậy nhỉ'],
+  ['わかりました', 'Hiểu rồi'],             ['わかりました。', 'Hiểu rồi'],
+  ['わかった', 'Hiểu rồi'],                  ['わかった。', 'Hiểu rồi'],
+  ['わかりました。ありがとうございます。', 'Hiểu rồi, cảm ơn bạn'],
+  // Gratitude
+  ['ありがとうございます', 'Cảm ơn bạn'],  ['ありがとうございます。', 'Cảm ơn bạn'],
+  ['ありがとう', 'Cảm ơn'],               ['ありがとう。', 'Cảm ơn'],
+  ['どうもありがとう', 'Thật sự cảm ơn'],  ['どうもありがとう。', 'Thật sự cảm ơn'],
+  // Apology / courtesy
+  ['すみません', 'Xin lỗi'],               ['すみません。', 'Xin lỗi'],
+  ['失礼しました', 'Xin lỗi đã phải phền'],     ['失礼しました。', 'Xin lỗi đã phải phền'],
+  ['ごめんなさい', 'Xin lỗi'],           ['ごめんなさい。', 'Xin lỗi'],
+  // Wait / pause
+  ['ちょっと待って', 'Đợi chút'],         ['ちょっと待って。', 'Đợi chút'],
+  ['少し待ってください', 'Xin chờ một chút'],
+  ['ちょっと待ってください', 'Xin chờ một chút'],
+  // Negation
+  ['いいえ', 'Không'],                    ['いいえ。', 'Không'],
+  ['いいえ、違います', 'Không, không phải vậy'],  ['違います', 'Không phải vậy'],
+  // Greeting / closing
+  ['おはようございます', 'Xin chào buổi sáng'],   ['こんにちは', 'Xin chào'],
+  ['こんのちは。', 'Chào buổi chiều'],       ['さようなら', 'Tạm biệt'],
+  ['さようなら。', 'Tạm biệt'],              ['またね', 'Hẹn gặp lại'],
+]);
+
 // Map sourceLanguage display name → Whisper ISO language code
 const WHISPER_LANG = {
   'English':    'en',
@@ -164,7 +201,9 @@ class Pipeline extends EventEmitter {
     this._startTime   = null;
     this._segId       = 0;
     this._epoch       = 0;       // tăng mỗi lần stop() — discard kết quả cũ
-    this._recentTexts = [];      // dedup: last N complete transcripts
+    this._recentTexts   = [];    // dedup: last N complete transcripts
+    this._contextWindow = [];    // (Point 1) last 2 JP transcripts → Whisper initial_prompt
+    this._transContext  = [];    // (Point 4) last 3 JP transcripts → NLLB context_src
     this._lastPartialText = '';  // track last partial to avoid duplicate emit
   }
 
@@ -256,9 +295,11 @@ class Pipeline extends EventEmitter {
     this.abuf.removeAllListeners('partial');
     this.abuf.removeAllListeners('snapshot');
     // Xóa toàn bộ hàng đợi: cả audio chưa STT lẫn transcript chưa dịch
-    this._queue      = [];
-    this._transQueue = [];
-    this._recentTexts = [];
+    this._queue         = [];
+    this._transQueue    = [];
+    this._recentTexts   = [];
+    this._contextWindow = [];
+    this._transContext  = [];
     this.isRunning = false;
     this.emit('stopped');
   }
@@ -359,6 +400,16 @@ class Pipeline extends EventEmitter {
     this.emit('processing', { stage: 'stt' });
     let transcript = '';
     try {
+      // Point 1: inject sliding context window into Whisper initial_prompt (JP only)
+      // Helps with Zero Anaphora — Whisper remembers subject/topic from prior sentences
+      if (this._isJaSource() && this._contextWindow.length > 0) {
+        const base = _srcToInitialPrompt(this.cfg.sourceLanguage);
+        const ctx  = this._contextWindow.slice(-2).join(' ');
+        const user = this._userContext || '';
+        // Combine: base conditioning + user context + recent sentences (max 224 chars)
+        const combined = [base, user, ctx].filter(Boolean).join(' ');
+        this.whisper.initialPrompt = combined.slice(0, 224);
+      }
       transcript = await this.whisper.transcribe(buf);
     } catch (err) {
       this._whisperBusy = false;
@@ -380,6 +431,12 @@ class Pipeline extends EventEmitter {
 
     // Reset partial tracking — final text replaces any partial
     this._lastPartialText = '';
+
+    // Point 1: update Whisper context window with confirmed JP transcript
+    if (this._isJaSource()) {
+      this._contextWindow.push(transcript);
+      if (this._contextWindow.length > 2) this._contextWindow.shift();
+    }
 
     // Emit final transcript immediately (replaces partial in UI)
     const id = ++this._segId;
@@ -421,6 +478,16 @@ class Pipeline extends EventEmitter {
 
   async _doTranslation({ transcript, timestamp, id, epoch }) {
     if (this._epoch !== epoch) return;
+
+    // Point 3: Aizuchi bypass cache — instant translation without NLLB
+    if (this._isJaSource()) {
+      const cached = AIZUCHI_CACHE.get(transcript);
+      if (cached) {
+        this.emit('translation', { original: transcript, translated: cached, timestamp, id });
+        return;
+      }
+    }
+
     this.emit('processing', { stage: 'translation' });
     let translated = '';
     try {
@@ -434,8 +501,12 @@ class Pipeline extends EventEmitter {
           pivotEnglish, 'eng_Latn', this.translator.tgtCode,
         );
       } else {
+        // Point 4: sliding context for NLLB — pass last confirmed JP sentence as context_src
+        const ctxSrc = this._isJaSource() && this._transContext.length > 0
+          ? this._transContext[this._transContext.length - 1]
+          : '';
         translated = await this.translator.translateRaw(
-          transcript, this.translator.srcCode, this.translator.tgtCode,
+          transcript, this.translator.srcCode, this.translator.tgtCode, ctxSrc,
         );
       }
     } catch (err) {
@@ -444,8 +515,13 @@ class Pipeline extends EventEmitter {
     if (this._epoch !== epoch) return;
     if (translated) {
       const tr = translated.trim();
-      // Filter repetitive translation output (e.g. NLLB hallucination "thôi nào, thôi nào")
+      // Filter repetitive translation output (e.g. NLLB hallucination "đây rồi, đây rồi")
       if (!_isNoise(tr) && !REPETITION_PATTERN.test(tr)) {
+        // Point 4: update translation context window after successful translation
+        if (this._isJaSource()) {
+          this._transContext.push(transcript);
+          if (this._transContext.length > 3) this._transContext.shift();
+        }
         this.emit('translation', { original: transcript, translated: tr, timestamp, id });
       }
     }

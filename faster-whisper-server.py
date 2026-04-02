@@ -181,10 +181,18 @@ def main():
                 compression_ratio_threshold=1.8,
                 repetition_penalty=1.2,
             )
-            # Collect all segment texts
+            # Collect all segment texts with per-segment hallucination filter (Point 5)
             texts = []
             for seg in segments:
-                texts.append(seg.text.strip())
+                # Skip silence segments: high no_speech_prob = Whisper not confident there's speech
+                if seg.no_speech_prob > 0.45:
+                    continue
+                # Skip repetitive / hallucination segments: high compression = repeated tokens
+                if seg.compression_ratio > 2.0:
+                    continue
+                t = seg.text.strip()
+                if t:
+                    texts.append(t)
             return " ".join(texts).strip()
         finally:
             try:
