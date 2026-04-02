@@ -6,11 +6,22 @@
  * Audio input đến từ:
  *   receivePCM(buffer) — push từ main.js khi nhận IPC 'audio:sendChunk'
  *
+ * Real-time strategy:
+ *   1. AudioBuffer gửi 'snapshot' mỗi ~1.5s (buffer copy, không flush)
+ *      → Pipeline gửi Whisper → emit 'partial' (text hiển thị lập tức)
+ *   2. AudioBuffer gửi 'chunk' khi phát hiện khoảng lặng hoặc hard cap
+ *      → Pipeline gửi Whisper → emit 'transcript' (text cuối cùng)
+ *      → Sau 500ms → dịch → emit 'translation'
+ *
+ * Kết quả: user thấy text gần như real-time, bản dịch xuất hiện sau ~0.5s.
+ *
  * Emits:
  *   'started'
  *   'stopped'
  *   'processing'  { stage: 'stt'|'translation'|'idle' }
- *   'transcript'  { text: string, timestamp: number }
+ *   'listening'   { timestamp }
+ *   'partial'     { text: string, timestamp: number }
+ *   'transcript'  { text: string, timestamp: number, id: number }
  *   'translation' { original, translated, timestamp, id }
  *   'error'       Error
  */
@@ -32,112 +43,6 @@ function fmtTime(ms) {
 
 // Match bất kỳ chuỗi nằm trong [...] hoặc (...) — bao gồm cả Unicode/tiếng Nhật
 const BLANK_PATTERN  = /^\s*\[[^\[\]]+\]\s*$|^\s*\([^()]+\)\s*$/;
-
-// ── Sentence-level accumulator ────────────────────────────────────────────
-/**
- * Gom các mảnh transcript từ Whisper cho đến khi phát hiện dấu câu kết thúc
- * (. ! ? 。 ！ ？) hoặc hết timeout, rồi mới gửi đi dịch.
- *
- * Điều này giải quyết vấn đề AudioBuffer cắt âm thanh theo khoảng lặng
- * (pause giữa vế câu) thay vì theo ranh giới câu thật sự.
- */
-class SentenceAccumulator {
-  /**
-   * @param {object} opts
-   * @param {number}   [opts.maxWaitMs=3000]  ms tối đa chờ câu hoàn chỉnh
-   * @param {number}   [opts.maxChars=200]    flush ngay nếu text quá dài
-   * @param {string}   [opts.language='']     ISO lang để điều chỉnh clause detection
-   * @param {Function} opts.onFlush           callback(text, timestamp, epoch)
-   */
-  constructor({ maxWaitMs = 3000, maxChars = 200, language = '', onFlush } = {}) {
-    this._parts      = [];
-    this._firstTs    = null;
-    this._firstEpoch = null;
-    this._timer      = null;
-    this._maxWaitMs  = maxWaitMs;
-    this._maxChars   = maxChars;
-    this._language   = language;  // 'ja', 'en', 'vi', ...
-    this._onFlush    = onFlush;
-  }
-
-  push(text, timestamp, epoch) {
-    if (this._parts.length === 0) {
-      this._firstTs    = timestamp;
-      this._firstEpoch = epoch;
-    }
-    this._parts.push(text);
-    const joined = this._joined();
-
-    // Flush ngay nếu phát hiện câu hoàn chỉnh hoặc text quá dài
-    if (this._isSentenceEnd(joined) || joined.length >= this._maxChars) {
-      this._doFlush();
-      return;
-    }
-
-    // Reset timer mỗi lần nhận thêm text mới — chờ thêm maxWaitMs
-    // từ chunk cuối cùng (thay vì từ chunk đầu tiên)
-    if (this._timer) clearTimeout(this._timer);
-    this._timer = setTimeout(() => {
-      this._timer = null;
-      this._doFlush();
-    }, this._maxWaitMs);
-  }
-
-  _joined() {
-    if (this._parts.length === 0) return '';
-    // Tiếng Nhật không cần khoảng trắng giữa các từ/vế
-    const hasJapanese = /[\u3040-\u30ff\u4e00-\u9fff]/.test(this._parts[0]);
-    return hasJapanese
-      ? this._parts.join('').trim()
-      : this._parts.join(' ').replace(/\s+/g, ' ').trim();
-  }
-
-  _isSentenceEnd(text) {
-    const t = text.trim();
-    if (!t) return false;
-
-    if (this._language === 'ja') {
-      // 。！？ = definite sentence end
-      if (/[。！？]\s*$/.test(t)) return true;
-      // 、or ，= clause boundary — only flush after substantial text (≥ 40 chars)
-      // Short clauses like "今日は、" should accumulate more context for accurate translation
-      if (/[\u3001\uff0c]\s*$/.test(t) && t.length >= 40) return true;
-      return false;
-    }
-
-    // English / Vietnamese / default
-    if (/[!?]\s*$/.test(t)) return true;
-    // Period — but skip common abbreviations
-    if (/\.\s*$/.test(t)) {
-      if (/\b(?:Mr|Mrs|Ms|Dr|Prof|Jr|Sr|vs|etc)\b\.\s*$/i.test(t)) return false;
-      return true;
-    }
-    return false;
-  }
-
-  _doFlush() {
-    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-    const text  = this._joined();
-    const ts    = this._firstTs;
-    const epoch = this._firstEpoch;
-    this._parts      = [];
-    this._firstTs    = null;
-    this._firstEpoch = null;
-    if (text && this._onFlush) this._onFlush(text, ts, epoch);
-  }
-
-  /** Flush ngay lập tức bất kể trạng thái — dùng khi stop() */
-  forceFlush() {
-    if (this._parts.length > 0) this._doFlush();
-  }
-
-  reset() {
-    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-    this._parts      = [];
-    this._firstTs    = null;
-    this._firstEpoch = null;
-  }
-}
 
 // Whisper hallucination phrases — produced when audio has no real speech
 // (music, silence, noise). Expand this list as needed.
@@ -184,34 +89,23 @@ function _srcToInitialPrompt(src) {
   return WHISPER_PROMPTS[lang] || '';
 }
 
-// ── Per-language presets for AudioBuffer and SentenceAccumulator ──────────
-// Tuned for natural speech patterns of each language
+// ── Per-language presets for AudioBuffer ────────────────────────────────────────
+// Near-realtime: ngắn chunk, flush nhanh → gửi Whisper sớm nhất có thể
 const LANG_PRESETS = {
   ja: {
-    // Japanese: SOV structure — verb comes at end, sentences are long
-    // Speakers pause briefly (300-500ms) between clauses but need full sentence for meaning
-    chunkMaxMs:  10000,   // JP sentences can be very long, wait for full thought
-    silenceMs:   600,     // JP natural clause pauses are short (~300-500ms)
-    minSpeechMs: 300,     // short utterances like はい are valid
-    maxWaitMs:   4000,    // wait longer for verb at end of sentence
-    maxChars:    300,     // JP sentences can be longer before forced flush
+    chunkMaxMs:  5000,    // flush tối đa 5s (từ 10s)
+    silenceMs:   400,     // pause 400ms = flush (từ 600ms)
+    minSpeechMs: 250,     // chấp nhận utterance ngắn
   },
   en: {
-    // English: SVO structure — meaning is clear earlier in sentence
-    // Speakers pause ~0.5-1s between sentences, shorter within
-    chunkMaxMs:  8000,    // EN sentences are moderate length
-    silenceMs:   1000,    // EN natural sentence pauses ~0.7-1.2s
-    minSpeechMs: 400,     // filter very short noise bursts
-    maxWaitMs:   2500,    // EN sentences resolve faster
-    maxChars:    200,     // standard flush threshold
+    chunkMaxMs:  5000,
+    silenceMs:   600,     // EN pause tự nhiên ~0.5–0.8s (từ 1000ms)
+    minSpeechMs: 300,
   },
   vi: {
-    // Vietnamese: SVO like English, tonal with clear pauses
-    chunkMaxMs:  8000,
-    silenceMs:   1000,
-    minSpeechMs: 400,
-    maxWaitMs:   2500,
-    maxChars:    200,
+    chunkMaxMs:  5000,
+    silenceMs:   600,
+    minSpeechMs: 300,
   },
 };
 const DEFAULT_PRESET = LANG_PRESETS.en;
@@ -250,28 +144,12 @@ class Pipeline extends EventEmitter {
     this._sttBusy     = false;
     this._transBusy   = false;
     this._whisperBusy = false;   // guard against concurrent Whisper calls
+    this._partialBusy = false;   // guard against concurrent partial STT
     this._startTime   = null;
     this._segId       = 0;
     this._epoch       = 0;       // tăng mỗi lần stop() — discard kết quả cũ
     this._recentTexts = [];      // dedup: last N complete transcripts
-
-    // Gom mảnh transcript thành câu hoàn chỉnh trước khi dịch
-    this._sentAccum = new SentenceAccumulator({
-      maxWaitMs: preset.maxWaitMs,
-      maxChars:  preset.maxChars,
-      language:  _srcToWhisperLang(cfg.sourceLanguage),
-      onFlush: (text, timestamp, epoch) => {
-        if (this._epoch !== epoch) return; // đã stop() rồi — bỏ qua
-        const id = ++this._segId;
-        this.emit('transcript', { text, timestamp, id });
-        if (!this.cfg.translateEnabled) {
-          this.emit('translation', { original: text, translated: '', timestamp, id });
-          return;
-        }
-        this._transQueue.push({ transcript: text, timestamp, id, epoch: this._epoch });
-        this._drainTranslation();
-      },
-    });
+    this._lastPartialText = '';  // track last partial to avoid duplicate emit
   }
 
   // ── Start / Stop ──────────────────────────────────────────────────
@@ -312,12 +190,18 @@ class Pipeline extends EventEmitter {
       console.log('[pipeline] translator: ONNX (CT2 not available)');
     }
 
-    this._sentAccum.reset();
     this.abuf.removeAllListeners('chunk');
     this.abuf.removeAllListeners('started');
+    this.abuf.removeAllListeners('snapshot');
     this.abuf.on('started', (startMs) => {
+      this._lastPartialText = '';
       // Notify renderer to show '...' listening bubble
       this.emit('listening', { timestamp: startMs - this._startTime });
+    });
+    this.abuf.on('snapshot', (buf, startMs) => {
+      // Interim STT — send snapshot to Whisper for real-time text display
+      const elapsed = startMs - this._startTime;
+      this._doPartialSTT(buf, elapsed);
     });
     this.abuf.on('chunk', (buf, startMs) => {
       const elapsed = startMs - this._startTime;
@@ -335,13 +219,11 @@ class Pipeline extends EventEmitter {
     if (!this.isRunning) return;
     // Tăng epoch — mọi STT/translation đang chờ sẽ bị discard khi hoàn thành
     this._epoch++;
-    // Flush và reset sentence accumulator — không để câu dở dang
-    this._sentAccum.forceFlush();
-    this._sentAccum.reset();
     // Dừng audio input ngay
     this.abuf.reset();
     this.abuf.removeAllListeners('chunk');
     this.abuf.removeAllListeners('partial');
+    this.abuf.removeAllListeners('snapshot');
     // Xóa toàn bộ hàng đợi: cả audio chưa STT lẫn transcript chưa dịch
     this._queue      = [];
     this._transQueue = [];
@@ -379,10 +261,6 @@ class Pipeline extends EventEmitter {
       silenceRMS:  cfg.silenceRMS || 200,
       minSpeechMs: preset.minSpeechMs,
     });
-    // Update SentenceAccumulator for new language
-    this._sentAccum._language  = _srcToWhisperLang(cfg.sourceLanguage);
-    this._sentAccum._maxWaitMs = preset.maxWaitMs;
-    this._sentAccum._maxChars  = preset.maxChars;
   }
 
   // ── Language hot-swap (while running) ───────────────────────
@@ -397,14 +275,30 @@ class Pipeline extends EventEmitter {
     this.abuf.maxMs      = preset.chunkMaxMs;
     this.abuf.silenceMs  = preset.silenceMs;
     this.abuf.minSpeechMs = preset.minSpeechMs;
-    // Update SentenceAccumulator rules
-    this._sentAccum._language  = lang;
-    this._sentAccum._maxWaitMs = preset.maxWaitMs;
-    this._sentAccum._maxChars  = preset.maxChars;
   }
 
-  // ── Internal: partial audio preview ───────────────────────
-  // (removed — no longer sending audio to Whisper mid-chunk)
+  // ── Internal: partial/interim STT (snapshot, non-blocking) ─────────
+  async _doPartialSTT(buf, timestamp) {
+    // Skip if a final STT or another partial is already running
+    if (this._partialBusy || this._whisperBusy) return;
+    this._partialBusy = true;
+    const epoch = this._epoch;
+    try {
+      const text = await this.whisper.transcribe(buf);
+      if (this._epoch !== epoch) return;
+      const t = (text || '').trim();
+      if (!t || _isNoise(t)) return;
+      // Only emit if text changed from last partial
+      if (t !== this._lastPartialText) {
+        this._lastPartialText = t;
+        this.emit('partial', { text: t, timestamp });
+      }
+    } catch {
+      // Ignore partial STT errors — final chunk will retry
+    } finally {
+      this._partialBusy = false;
+    }
+  }
 
   // ── Internal: STT queue drain ────────────────────────────────────
   async _drainSTT() {
@@ -447,10 +341,23 @@ class Pipeline extends EventEmitter {
     this._recentTexts.push(transcript);
     if (this._recentTexts.length > 5) this._recentTexts.shift();
 
-    // Đưa mảnh transcript vào SentenceAccumulator.
-    // Accumulator sẽ gom lại và chỉ emit 'transcript' + enqueue dịch
-    // khi phát hiện dấu câu kết thúc hoặc hết timeout.
-    this._sentAccum.push(transcript, timestamp, this._epoch);
+    // Reset partial tracking — final text replaces any partial
+    this._lastPartialText = '';
+
+    // Emit final transcript immediately (replaces partial in UI)
+    const id = ++this._segId;
+    this.emit('transcript', { text: transcript, timestamp, id });
+    if (!this.cfg.translateEnabled) {
+      this.emit('translation', { original: transcript, translated: '', timestamp, id });
+      return;
+    }
+    // Delay translation 500ms so user sees transcript first
+    const currentEpoch = this._epoch;
+    setTimeout(() => {
+      if (this._epoch !== currentEpoch) return;
+      this._transQueue.push({ transcript, timestamp, id, epoch: currentEpoch });
+      this._drainTranslation();
+    }, 500);
   }
 
   // ── Internal: Translation queue drain ───────────────────────────
@@ -475,7 +382,7 @@ class Pipeline extends EventEmitter {
       if (this._shouldPivot()) {
         // Pivot: source → English → target
         const pivotEnglish = await this.translator.translateRaw(
-          transcript, this.translator.srcCode, 'eng_Latn', '', 6,
+          transcript, this.translator.srcCode, 'eng_Latn', '', 4,
         );
         if (!pivotEnglish || this._epoch !== epoch) return;
         translated = await this.translator.translateRaw(

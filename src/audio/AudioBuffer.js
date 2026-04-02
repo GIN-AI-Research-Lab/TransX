@@ -1,15 +1,17 @@
 /**
  * src/audio/AudioBuffer.js
  *
- * Accumulates raw 16-bit signed LE PCM and emits 'chunk' events
- * based on two strategies:
+ * Accumulates raw 16-bit signed LE PCM and emits events:
  *
+ *   'started'  startMs — first audio sample received (new chunk begins)
+ *   'snapshot' Buffer, startMs — periodic copy of accumulated audio (every snapshotMs)
+ *                                for interim/partial STT (buffer is NOT flushed)
+ *   'chunk'    Buffer, startMs — final PCM buffer ready for STT (buffer IS flushed)
+ *
+ * Flush strategies:
  *   1. Hard cap  — flush when buffer reaches maxMs of audio.
  *   2. Silence   — flush after silenceMs of quiet audio once we have
  *                  a minimum amount of speech content.
- *
- * Emits:
- *   'chunk'  Buffer  — PCM buffer ready to send to Whisper
  */
 
 'use strict';
@@ -24,6 +26,7 @@ class AudioBuffer extends EventEmitter {
    * @param {number} [opts.silenceMs=900]    silence window in ms
    * @param {number} [opts.silenceRMS=280]   RMS below which = silence
    * @param {number} [opts.minSpeechMs=300]  min speech before silence flush
+   * @param {number} [opts.snapshotMs=1500]  interval for partial snapshots (0 = disabled)
    */
   constructor(opts = {}) {
     super();
@@ -32,9 +35,11 @@ class AudioBuffer extends EventEmitter {
     this.silenceMs    = opts.silenceMs    || 900;
     this.silenceRMS   = opts.silenceRMS   || 280;
     this.minSpeechMs  = opts.minSpeechMs  || 300;
+    this.snapshotMs   = opts.snapshotMs !== undefined ? opts.snapshotMs : 1500;
 
-    this._buf         = Buffer.alloc(0);
+    this._buf          = Buffer.alloc(0);
     this._silenceTimer = null;
+    this._snapshotTimer = null;
     this._chunkStartMs = null;  // wall-clock khi chunk bắt đầu tích lũy
   }
 
@@ -66,6 +71,8 @@ class AudioBuffer extends EventEmitter {
     if (this._buf.length === 0) {
       this._chunkStartMs = Date.now();
       this.emit('started', this._chunkStartMs);  // notify pipeline audio incoming
+      // Start periodic snapshot timer for interim STT
+      this._startSnapshotTimer();
     }
     this._buf = Buffer.concat([this._buf, chunk]);
 
@@ -95,6 +102,7 @@ class AudioBuffer extends EventEmitter {
 
   _flush() {
     this._clearTimer();
+    this._clearSnapshotTimer();
     if (this._buf.length >= this._minSpeechBytes) {
       // Emit (buf, startMs) — startMs dùng để hiển thị mốc thời gian
       this.emit('chunk', Buffer.from(this._buf), this._chunkStartMs || Date.now());
@@ -110,8 +118,26 @@ class AudioBuffer extends EventEmitter {
     }
   }
 
+  _startSnapshotTimer() {
+    this._clearSnapshotTimer();
+    if (!this.snapshotMs || this.snapshotMs <= 0) return;
+    this._snapshotTimer = setInterval(() => {
+      if (this._buf.length >= this._minSpeechBytes) {
+        this.emit('snapshot', Buffer.from(this._buf), this._chunkStartMs || Date.now());
+      }
+    }, this.snapshotMs);
+  }
+
+  _clearSnapshotTimer() {
+    if (this._snapshotTimer) {
+      clearInterval(this._snapshotTimer);
+      this._snapshotTimer = null;
+    }
+  }
+
   reset() {
     this._clearTimer();
+    this._clearSnapshotTimer();
     this._buf = Buffer.alloc(0);
     this._chunkStartMs = null;
   }

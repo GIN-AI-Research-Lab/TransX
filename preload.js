@@ -27,6 +27,7 @@ const LISTEN_CHANNELS = new Set([
   'pipeline:status',
   'pipeline:processing',
   'pipeline:listening',
+  'pipeline:partial',
   'pipeline:transcript',
   'pipeline:translation',
   'pipeline:error',

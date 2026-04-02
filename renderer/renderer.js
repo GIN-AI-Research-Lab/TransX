@@ -406,6 +406,13 @@ ipc.on('pipeline:listening', ({ timestamp }) => {
   _scrollToBottom();
 });
 
+// pipeline:partial — interim transcript, update live bubble text in real-time
+ipc.on('pipeline:partial', ({ text }) => {
+  if (!_liveEl) return;
+  _liveOrigEl.innerHTML = escHtml(text) + ' <span class="typing-cursor">…</span>';
+  _scrollToBottom();
+});
+
 // pipeline:transcript — finalise live segment as pending translation
 ipc.on('pipeline:transcript', ({ text, timestamp, id }) => {
   if (_liveEl) {
