@@ -26,3 +26,5 @@ Thumbs.db
 
 # Electron cache
 .webpack/
+
+.build-cache/

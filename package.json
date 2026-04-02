@@ -12,8 +12,8 @@
     "setup:python": "node scripts/setup-python-embed.js",
     "setup:ct2": "python-embed\\python.exe -X utf8 scripts\\setup-nllb-ct2.py",
     "setup:all": "npm run setup:python && npm run setup:ct2",
-    "build": "electron-builder --win --x64",
-    "build:portable": "electron-builder --win portable",
+    "build": "node scripts/prepare-build-cache.js --win --x64",
+    "build:portable": "node scripts/prepare-build-cache.js --win portable",
     "postinstall": "electron-rebuild"
   },
   "build": {
@@ -22,7 +22,9 @@
     "copyright": "Copyright © 2026 Trans Overlay",
     "win": {
       "target": ["nsis", "portable"],
-      "requestedExecutionLevel": "asInvoker"
+      "requestedExecutionLevel": "asInvoker",
+      "sign": null,
+      "signDlls": false
     },
     "files": [
       "main.js",
