@@ -36,16 +36,17 @@
       "!**/*.ps1",
       "!scripts/**",
       "!whisper-models/**",
+      "!zipformer-model/**",
       "!faster-whisper-server.py",
+      "!zipformer-server.py",
       "!nllb-models/**"
     ],
     "extraResources": [
-      { "from": "faster-whisper-server.py", "to": "faster-whisper-server.py" },
-      { "from": "whisper-models",          "to": "whisper-models",
-        "filter": ["models--Systran--**"] },
-      { "from": "nllb-ct2-server.py",      "to": "nllb-ct2-server.py"       },
-      { "from": "nllb-ct2-model",     "to": "nllb-ct2-model"      },
-      { "from": "python-embed",       "to": "python-embed"        }
+      { "from": "zipformer-server.py",  "to": "zipformer-server.py"  },
+      { "from": "zipformer-model",      "to": "zipformer-model"      },
+      { "from": "nllb-ct2-server.py",   "to": "nllb-ct2-server.py"  },
+      { "from": "nllb-ct2-model",       "to": "nllb-ct2-model"      },
+      { "from": "python-embed",         "to": "python-embed"        }
     ],
     "compression": "normal",
     "asar": true,

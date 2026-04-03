@@ -1,9 +1,12 @@
 /**
  * src/services/ServiceManager.js
  *
- * Manages the faster-whisper Python server (CTranslate2 backend).
- * Uses embedded Python + faster-whisper for 2-4x speedup over whisper.cpp.
+ * Manages the Zipformer-30M-RNNT-6000h Python server (sherpa-onnx backend).
+ * Uses embedded Python + sherpa-onnx for fast, low-latency English STT.
  * Whisper language is derived automatically from cfg.sourceLanguage.
+ *
+ * NOTE: Zipformer-30M-RNNT-6000h is English-only.
+ *   Japanese / Vietnamese source language will produce incorrect transcriptions.
  */
 
 'use strict';
@@ -46,7 +49,7 @@ class ServiceManager {
       : path.join(__dirname, '..', '..');
   }
 
-  get whisperServerScript() { return path.join(this._root, 'faster-whisper-server.py'); }
+  get whisperServerScript() { return path.join(this._root, 'zipformer-server.py'); }
   get nllbCt2ServerScript() { return path.join(this._root, 'nllb-ct2-server.py'); }
 
   /** Prefers bundled Python (python-embed/python.exe), falls back to system Python. */
@@ -55,9 +58,9 @@ class ServiceManager {
     return fs.existsSync(embedded) ? embedded : 'python';
   }
 
-  /** Return the whisper model size name based on what's available locally or config. */
+  /** Return the zipformer model directory path. */
   _whisperModelSize(cfg) {
-    return cfg.whisperModel || 'base';
+    return cfg.whisperModel || 'base';  // retained for config compat; unused by zipformer
   }
 
   _portFromEndpoint(endpoint = 'http://127.0.0.1:8080') {
@@ -71,31 +74,27 @@ class ServiceManager {
 
     const script = this.whisperServerScript;
     if (!fs.existsSync(script)) {
-      console.warn('[faster-whisper] server script not found:', script);
+      console.warn('[zipformer] server script not found:', script);
       return Promise.resolve();
     }
 
-    const port      = this._portFromEndpoint(cfg.whisperEndpoint);
-    const modelSize = this._whisperModelSize(cfg);
-    const language  = sourceLangToWhisperLang(cfg.sourceLanguage);
-    return this._spawnWhisper(port, modelSize, language);
+    const port = this._portFromEndpoint(cfg.whisperEndpoint);
+    return this._spawnWhisper(port);
   }
 
-  _spawnWhisper(port, modelSize, language) {
+  _spawnWhisper(port) {
     return new Promise((resolve, reject) => {
-      const script = this.whisperServerScript;
+      const script  = this.whisperServerScript;
+      const modelDir = path.join(this._root, 'zipformer-model');
       const args = [
         script,
         '--host', '127.0.0.1',
         '--port', String(port),
-        '--model', modelSize,
-        '--device', 'cpu',
-        '--compute-type', 'int8',
-        '--cpu-threads', '4',
+        '--model-dir', modelDir,
+        '--num-threads', '4',
       ];
-      if (language) args.push('--language', language);
 
-      console.log('[faster-whisper] spawning: model=%s port=%d lang=%s', modelSize, port, language || 'auto');
+      console.log('[zipformer] spawning: port=%d model-dir=%s', port, modelDir);
 
       const proc = spawn(
         this._pythonExe, args,
@@ -121,32 +120,32 @@ class ServiceManager {
 
       const onData = (d) => {
         const line = d.toString().trim();
-        if (line) console.log('[faster-whisper]', line);
+        if (line) console.log('[zipformer]', line);
         if (/listening/i.test(line)) { this._restartCount = 0; done(null); }
         if (!resolved && /missing|not found|sys\.exit/i.test(line)) {
-          done(new Error('[faster-whisper] ' + line));
+          done(new Error('[zipformer] ' + line));
         }
       };
       proc.stdout.on('data', onData);
       proc.stderr.on('data', onData);
       proc.on('error', (e) => {
-        console.error('[faster-whisper] error:', e.message);
+        console.error('[zipformer] error:', e.message);
         done(e);
       });
       proc.on('exit', (code) => {
         this._whisperProc = null;
-        console.log('[faster-whisper] exited', code);
-        if (!resolved) done(new Error('[faster-whisper] process exited with code ' + code));
+        console.log('[zipformer] exited', code);
+        if (!resolved) done(new Error('[zipformer] process exited with code ' + code));
         if (!this._stopping && this._restartCount < MAX_RESTARTS) {
           this._restartCount++;
           setTimeout(() => {
-            if (!this._stopping) this._spawnWhisper(port, modelSize, language).catch(() => {});
+            if (!this._stopping) this._spawnWhisper(port).catch(() => {});
           }, RESTART_DELAY);
         }
       });
 
-      // Model load can take up to 120s on first run — reject on timeout
-      setTimeout(() => done(new Error('[faster-whisper] timeout waiting for server to start')), 120000);
+      // Model load is fast (int8 ONNX, ~35 MB) — 60s timeout is generous
+      setTimeout(() => done(new Error('[zipformer] timeout waiting for server to start')), 60000);
     });
   }
 

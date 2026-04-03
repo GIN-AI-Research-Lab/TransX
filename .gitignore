@@ -9,7 +9,7 @@ out/
 nllb-models/
 whisper-models/
 nllb-ct2-model/
-
+zipformer-model/
 # Python embeddable runtime (auto-installed by npm start)
 python-embed/
 

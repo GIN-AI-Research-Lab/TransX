@@ -31,8 +31,8 @@ cfg.whisperLanguage = svcMgr.sourceLangToWhisperLang(cfg.sourceLanguage) || 'aut
 // ── Start Whisper IMMEDIATELY (before app.whenReady) ───────────────────────
 // Spawning the Python process here saves 2-5s while Electron initialises its window system.
 const _whisperStartPromise = svcMgr.startWhisper(cfg)
-  .then(() => { console.log('[app] faster-whisper ready'); })
-  .catch((e) => { console.error('[app] faster-whisper failed:', e.message); return Promise.reject(e); });
+  .then(() => { console.log('[app] zipformer-server ready'); })
+  .catch((e) => { console.error('[app] zipformer-server failed:', e.message); return Promise.reject(e); });
 
 // ── Tray icon (generated programmatically — no external asset needed) ─────────
 function makeTrayImage(running) {

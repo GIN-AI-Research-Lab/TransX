@@ -309,13 +309,13 @@ class Pipeline extends EventEmitter {
     const ok = await this.whisper.ping();
     if (!ok) {
       this.emit('error', new Error(
-        `Faster-Whisper server chưa chạy tại ${this.cfg.whisperEndpoint || 'http://localhost:8080'}\n` +
+        `Zipformer STT server chưa chạy tại ${this.cfg.whisperEndpoint || 'http://localhost:8080'}\n` +
         `Hãy chờ server khởi động hoàn tất.`
       ));
       return;
     }
 
-    // Translator: CT2 server only (dùng faster-whisper + nllb-ct2-model)
+    // Translator: CT2 server only (dùng zipformer-server + nllb-ct2-model)
     const ct2ok = await this._nllbCt2.ping();
     if (!ct2ok) {
       this.emit('error', new Error(
