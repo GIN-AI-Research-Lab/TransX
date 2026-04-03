@@ -10,8 +10,8 @@
     "setup:python": "node scripts/setup-python-embed.js",
     "setup:ct2": "python-embed\\python.exe -X utf8 scripts\\setup-nllb-ct2.py",
     "setup:all": "node scripts/setup-check.js",
-    "build": "node scripts/prepare-build-cache.js --win --x64",
-    "build:portable": "node scripts/prepare-build-cache.js --win portable",
+    "build": "node scripts/prepare-build-cache.js --win dir",
+    "build:zip": "node scripts/prepare-build-cache.js --win dir && node scripts/pack-zip.js",
     "postinstall": "electron-rebuild"
   },
   "build": {
@@ -19,7 +19,7 @@
     "productName": "Trans Overlay",
     "copyright": "Copyright © 2026 Trans Overlay",
     "win": {
-      "target": ["nsis", "portable"],
+      "target": ["dir"],
       "requestedExecutionLevel": "asInvoker",
       "sign": null,
       "signDlls": false
@@ -47,16 +47,7 @@
       { "from": "nllb-ct2-model",     "to": "nllb-ct2-model"      },
       { "from": "python-embed",       "to": "python-embed"        }
     ],
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "createStartMenuShortcut": true,
-      "createDesktopShortcut": true,
-      "shortcutName": "Trans Overlay",
-      "deleteAppDataOnUninstall": false
-    },
-    "compression": "maximum",
+    "compression": "normal",
     "asar": true,
     "asarUnpack": [
       "**/*.node",
