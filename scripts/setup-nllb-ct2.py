@@ -118,15 +118,38 @@ def main():
         print('\nERROR: Conversion subprocess failed (see output above).')
         sys.exit(1)
 
-    # ── Copy sentencepiece tokenizer into ct2 dir (self-contained bundle) ─
+    # ── Copy sentencepiece tokenizer — from HF hub cache (no nllb-models/ needed) ─
     import shutil
-    sp_src = os.path.join(ROOT, 'nllb-models', 'nllb-200-distilled-600M', 'sentencepiece.bpe.model')
     sp_dst = os.path.join(OUTPUT_DIR, 'sentencepiece.bpe.model')
-    if os.path.exists(sp_src):
-        shutil.copy2(sp_src, sp_dst)
-        print('[copy] sentencepiece.bpe.model -> nllb-ct2-model/')
-    else:
-        print('WARN: sentencepiece.bpe.model not found in nllb-models/, tokenizer not copied.')
+    if not os.path.exists(sp_dst):
+        print('[tokenizer] Downloading sentencepiece.bpe.model from HuggingFace...')
+        try:
+            from huggingface_hub import hf_hub_download
+            sp_cached = hf_hub_download('facebook/nllb-200-distilled-600M', 'sentencepiece.bpe.model')
+            shutil.copy2(sp_cached, sp_dst)
+            print('[tokenizer] sentencepiece.bpe.model -> nllb-ct2-model/')
+        except Exception as e:
+            print(f'ERROR: Could not download sentencepiece tokenizer: {e}')
+            sys.exit(1)
+
+    # ── Clean up HuggingFace cache for NLLB original weights (~1.2 GB) ────
+    # The CT2 model in nllb-ct2-model/ is self-contained; the HF cache is no longer needed.
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+        import glob
+        hf_nllb_cache = os.path.join(HF_HUB_CACHE, 'models--facebook--nllb-200-distilled-600M')
+        if os.path.exists(hf_nllb_cache):
+            shutil.rmtree(hf_nllb_cache)
+            print('[cleanup] Deleted HF cache: models--facebook--nllb-200-distilled-600M (~1.2 GB freed)')
+        else:
+            # Try legacy default ~/.cache/huggingface/hub/
+            legacy = os.path.join(os.path.expanduser('~'), '.cache', 'huggingface', 'hub',
+                                  'models--facebook--nllb-200-distilled-600M')
+            if os.path.exists(legacy):
+                shutil.rmtree(legacy)
+                print('[cleanup] Deleted HF cache (legacy path): ~1.2 GB freed')
+    except Exception as e:
+        print(f'[cleanup] Could not delete HF cache (non-fatal): {e}')
 
     # ── Summary ────────────────────────────────────────────────────────────
     size_mb = sum(

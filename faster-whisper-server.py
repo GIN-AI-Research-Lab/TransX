@@ -113,6 +113,8 @@ def main():
     parser.add_argument("--device", default="cpu", help="cpu or cuda")
     parser.add_argument("--compute-type", default="int8",
                         help="int8, float16, float32")
+    parser.add_argument("--cpu-threads", type=int, default=4,
+                        help="CPU threads for model load and inference (default: 4)")
     args = parser.parse_args()
 
     # ── Check dependencies ─────────────────────────────────────────────
@@ -146,7 +148,7 @@ def main():
         device=args.device,
         compute_type=args.compute_type,
         download_root=os.path.join(root_dir, "whisper-models"),
-        cpu_threads=2,
+        cpu_threads=args.cpu_threads,
     )
     print("[faster-whisper] Model ready.", flush=True)
 

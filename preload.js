@@ -32,6 +32,7 @@ const LISTEN_CHANNELS = new Set([
   'pipeline:translation',
   'pipeline:draft-translation',
   'pipeline:error',
+  'service:status',   // { whisper: 'loading'|'ready'|'error', msg? }
 ]);
 
 contextBridge.exposeInMainWorld('electron', {

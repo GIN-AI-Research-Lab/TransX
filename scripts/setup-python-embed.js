@@ -140,7 +140,7 @@ async function main() {
     console.log('[3/4] pip installed.\n');
   }
 
-  // ── Step 4: Install ctranslate2 + sentencepiece ───────────────────────────
+  // ── Step 4: Install ctranslate2 + sentencepiece + faster-whisper ─────────
   const ct2Module = path.join(EMBED_DIR, 'Lib', 'site-packages', 'ctranslate2');
   if (fs.existsSync(ct2Module)) {
     console.log('[4/4] ctranslate2 already installed — skipping.\n');
@@ -152,6 +152,20 @@ async function main() {
       '--disable-pip-version-check',
     ], { cwd: ROOT });
     console.log('[4/4] Done.\n');
+  }
+
+  // ── Step 5: Install faster-whisper ───────────────────────────────────────
+  const fwModule = path.join(EMBED_DIR, 'Lib', 'site-packages', 'faster_whisper');
+  if (fs.existsSync(fwModule)) {
+    console.log('[5/5] faster-whisper already installed — skipping.\n');
+  } else {
+    console.log('[5/5] Installing faster-whisper (có thể mất vài phút)…');
+    run(pythonExe, [
+      '-m', 'pip', 'install', 'faster-whisper',
+      '--no-warn-script-location',
+      '--disable-pip-version-check',
+    ], { cwd: ROOT });
+    console.log('[5/5] Done.\n');
   }
 
   // ── Summary ───────────────────────────────────────────────────────────────

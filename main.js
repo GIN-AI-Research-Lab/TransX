@@ -19,7 +19,6 @@ app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
 const path           = require('path');
 const { loadConfig, saveConfig } = require('./config');
 const Pipeline       = require('./src/pipeline/Pipeline');
-const NLLBTranslator = require('./src/ai/NLLBTranslator');
 const { createSolidPNG } = require('./src/utils/pngHelper');
 const svcMgr         = require('./src/services/ServiceManager');
 
@@ -28,6 +27,12 @@ let overlayWin, tray;
 let pipeline = null;
 let cfg      = loadConfig();
 cfg.whisperLanguage = svcMgr.sourceLangToWhisperLang(cfg.sourceLanguage) || 'auto';
+
+// ── Start Whisper IMMEDIATELY (before app.whenReady) ───────────────────────
+// Spawning the Python process here saves 2-5s while Electron initialises its window system.
+const _whisperStartPromise = svcMgr.startWhisper(cfg)
+  .then(() => { console.log('[app] faster-whisper ready'); })
+  .catch((e) => { console.error('[app] faster-whisper failed:', e.message); return Promise.reject(e); });
 
 // ── Tray icon (generated programmatically — no external asset needed) ─────────
 function makeTrayImage(running) {
@@ -271,16 +276,31 @@ app.whenReady().then(async () => {
     catch (e) { console.warn('[hotkey] could not register:', cfg.hotkey); }
   }
 
-  // ── Start services ──────────────────────────────────────
-  await svcMgr.startWhisper(cfg).catch((e) => console.warn('[whisper]', e.message));
-  await svcMgr.startNLLB(cfg).catch((e) => console.warn('[nllb-ct2]', e.message));
-
-  if (cfg.translateEnabled && !NLLBTranslator.modelExists(svcMgr.nllbModelDir)) {
-    console.warn('[app] NLLB model not found. Run: npm run download-model-fast');
-  }
-
+  // ── Open overlay immediately — user sees app at once ────────────────────
   createOverlay();
   if (!cfg.startMinimized) overlayWin?.show();
+
+  // ── Start NLLB in background ─────────────────────────────────────────────
+  const ct2ModelBin = path.join(svcMgr._root, 'nllb-ct2-model', 'model.bin');
+  if (cfg.translateEnabled && !require('fs').existsSync(ct2ModelBin)) {
+    console.warn('[app] NLLB CT2 model not found — run: npm run setup:ct2');
+  }
+  svcMgr.startNLLB(cfg).catch((e) => console.warn('[nllb-ct2]', e.message));
+
+  // ── Start Whisper in background, notify renderer when ready ───────────────
+  // Renderer shows "⏳ Đang khởi động..." and disables Start until this resolves.
+  tray.setToolTip('Trans Overlay — starting Whisper...');
+  svcMgr.startWhisper(cfg)
+    .then(() => {
+      console.log('[app] faster-whisper ready');
+      tray.setToolTip('Trans Overlay');
+      overlayWin?.webContents.send('service:status', { whisper: 'ready' });
+    })
+    .catch((e) => {
+      console.error('[app] faster-whisper failed:', e.message);
+      tray.setToolTip('Trans Overlay — Whisper error');
+      overlayWin?.webContents.send('service:status', { whisper: 'error', msg: e.message });
+    });
 });
 
 app.on('window-all-closed', () => {

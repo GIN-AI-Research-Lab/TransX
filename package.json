@@ -4,14 +4,12 @@
   "description": "Real-time audio translation overlay â€” System Audio/Mic â†’ Whisper STT â†’ Local LLM â†’ Overlay",
   "main": "main.js",
   "scripts": {
+    "prestart": "node scripts/setup-check.js",
     "start": "electron .",
     "dev": "electron . --dev",
-    "download-model": "node scripts/download-nllb-model.js",
-    "download-model-fast": "node scripts/download-nllb-model.js --model 200M",
-    "download-model-fast:auth": "node -e \"if(!process.env.HF_TOKEN){console.error('Thiếu HF_TOKEN!\\nCách lấy token:\\n  1. Đăng ký tại https://huggingface.co\\n  2. Vào https://huggingface.co/settings/tokens\\n  3. Tạo token (Read)\\n  4. Đặt: $env:HF_TOKEN=\\\"hf_xxx...\\\" rồi chạy lại lệnh này');process.exit(1)}\" && node scripts/download-nllb-model.js --model 200M",
     "setup:python": "node scripts/setup-python-embed.js",
     "setup:ct2": "python-embed\\python.exe -X utf8 scripts\\setup-nllb-ct2.py",
-    "setup:all": "npm run setup:python && npm run setup:ct2",
+    "setup:all": "node scripts/setup-check.js",
     "build": "node scripts/prepare-build-cache.js --win --x64",
     "build:portable": "node scripts/prepare-build-cache.js --win portable",
     "postinstall": "electron-rebuild"
@@ -38,7 +36,7 @@
       "!**/*.ps1",
       "!scripts/**",
       "!whisper-models/**",
-      "faster-whisper-server.py",
+      "!faster-whisper-server.py",
       "!nllb-models/**"
     ],
     "extraResources": [

@@ -32,6 +32,7 @@ const pendingTransEl=$('pending-trans');
 // ── State ─────────────────────────────────────────────────────────────────
 let running      = false;
 let clickThrough = false;
+let _whisperReady = false;  // set to true when main sends service:status {whisper:'ready'}
 /** @type {RendererAudioCapture|null} */
 let audioCapture = null;
 let segments     = [];           // [{ id, el, transEl }] all displayed segments
@@ -46,6 +47,7 @@ let _uiLang = 'vi';
 const I18N = {
   en: {
     statusReady:         'Press ▶ to start',
+    statusLoading:        '⏳ Starting Whisper…',
     statusListening:     'Listening…',
     statusRecognising:   'Recognising…',
     statusTranslating:   'Translating…',
@@ -95,6 +97,7 @@ const I18N = {
   },
   vi: {
     statusReady:         'Nhấn ▶ để bắt đầu',
+    statusLoading:        '⏳ Đang khởi động Whisper…',
     statusListening:     'Đang nghe…',
     statusRecognising:   'Đang nhận dạng…',
     statusTranslating:   'Đang dịch…',
@@ -144,6 +147,7 @@ const I18N = {
   },
   ja: {
     statusReady:         '▶ を押して開始',
+    statusLoading:        '⏳ Whisper を起動中…',
     statusListening:     '音声入力中…',
     statusRecognising:   '認識中…',
     statusTranslating:   '翻訳中…',
@@ -221,7 +225,9 @@ function applyI18n(lang) {
   // btn-pass dynamic title depends on clickThrough state
   btnPass.title = clickThrough ? t('titlePassOn') : t('titlePassOff');
   // update status bar only when idle
-  if (!running) statusMsg.textContent = t('statusReady');
+  if (!running) {
+    statusMsg.textContent = _whisperReady ? t('statusReady') : t('statusLoading');
+  }
 }
 
 // Auto-scroll only when already at the bottom (don't force-scroll while user is reviewing history)
@@ -251,7 +257,7 @@ function setRunning(r) {
     pendingSegEl.classList.add('hidden');
     statusMsg.textContent = t('statusListening');
   } else {
-    statusMsg.textContent = t('statusReady');
+    statusMsg.textContent = _whisperReady ? t('statusReady') : t('statusLoading');
   }
 }
 
@@ -649,6 +655,33 @@ document.getElementById('sp-uiLanguage').addEventListener('change', (e) => {
   ]);
   applyI18n(cfg.uiLanguage || 'vi');
   setRunning(status.running);
+
+  // Show loading state until whisper is ready
+  if (!status.running) {
+    btnToggle.disabled = true;
+    btnToggle.title = t('statusLoading');
+    statusMsg.textContent = t('statusLoading');
+    dot.className = 'dot dot--idle';
+    spin.classList.remove('hidden');
+  }
 })();
+
+// ── Service status (whisper ready / error) ────────────────────────────────
+ipc.on('service:status', (d) => {
+  if (d.whisper === 'ready') {
+    _whisperReady = true;
+    btnToggle.disabled = false;
+    btnToggle.title = 'Start / Stop (Ctrl+Shift+T)';
+    if (!running) {
+      statusMsg.textContent = t('statusReady');
+      spin.classList.add('hidden');
+      dot.className = 'dot dot--idle';
+    }
+  } else if (d.whisper === 'error') {
+    _whisperReady = false;
+    btnToggle.disabled = true;
+    showError('Whisper — ' + (d.msg || 'không khởi động được'));
+  }
+});
 
 

@@ -31,7 +31,6 @@
 const { EventEmitter } = require('events');
 const AudioBuffer     = require('../audio/AudioBuffer');
 const WhisperClient   = require('../ai/WhisperClient');
-const NLLBTranslator  = require('../ai/NLLBTranslator');
 const NLLBClient      = require('../ai/NLLBClient');
 
 // Format elapsed ms → 'M:SS'
@@ -316,29 +315,18 @@ class Pipeline extends EventEmitter {
       return;
     }
 
-    // Chọn translator: CT2 nếu server đang chạy, fallback ONNX (lazy init)
+    // Translator: CT2 server only (dùng faster-whisper + nllb-ct2-model)
     const ct2ok = await this._nllbCt2.ping();
-    if (ct2ok) {
-      this.translator = this._nllbCt2;
-      console.log('[pipeline] translator: CTranslate2 (CT2)');
-    } else {
-      // Only use ONNX fallback if model files are present locally
-      const svcMgr = require('../services/ServiceManager');
-      const fs     = require('fs');
-      const path   = require('path');
-      const onnxConfig = path.join(svcMgr.nllbModelDir, 'nllb-200-distilled-600M', 'config.json');
-      if (!fs.existsSync(onnxConfig)) {
-        this.emit('error', new Error(
-          'CT2 translation server chưa sẵn sàng.\n' +
-          'Vui lòng chờ vài giây rồi thử lại bắt đầu dịch.'
-        ));
-        this.isRunning = false;
-        return;
-      }
-      if (!this._nllbOnnx) this._nllbOnnx = new NLLBTranslator(this.cfg);
-      this.translator = this._nllbOnnx;
-      console.log('[pipeline] translator: ONNX (CT2 not available)');
+    if (!ct2ok) {
+      this.emit('error', new Error(
+        'NLLB CT2 translation server chưa sẵn sàng.\n' +
+        'Server đang khởi động — vui lòng chờ vài giây rồi thử lại.'
+      ));
+      this.isRunning = false;
+      return;
     }
+    this.translator = this._nllbCt2;
+    console.log('[pipeline] translator: CTranslate2 (CT2)');
 
     if (this._isJaSource()) {
       console.log('[pipeline] Japanese: NLLB-CT2 direct JP→VI (no EN pivot)');

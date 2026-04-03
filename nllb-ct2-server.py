@@ -55,11 +55,8 @@ def main():
     root_dir   = os.path.dirname(os.path.abspath(__file__))
     ct2_dir    = os.path.join(root_dir, "nllb-ct2-model")
 
-    # Tokenizer: look in ct2 dir first (bundled build), fallback to nllb-models (dev)
+    # Tokenizer: must be in nllb-ct2-model/ (put there by setup-nllb-ct2.py)
     sp_path = os.path.join(ct2_dir, "sentencepiece.bpe.model")
-    if not os.path.exists(sp_path):
-        sp_path = os.path.join(root_dir, "nllb-models",
-                               "nllb-200-distilled-600M", "sentencepiece.bpe.model")
 
     if not os.path.exists(os.path.join(ct2_dir, "model.bin")):
         print(f"[nllb-ct2] CT2 model not found at: {ct2_dir}", flush=True)

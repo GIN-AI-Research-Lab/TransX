@@ -114,6 +114,6 @@ async function ensureCache() {
   const ebBin  = path.join(ROOT, 'node_modules', '.bin', 'electron-builder.cmd');
   console.log('[build] electron-builder ' + args.join(' '));
 
-  const result = spawnSync(ebBin, args, { stdio: 'inherit', shell: false, env: process.env });
+  const result = spawnSync(ebBin, args, { stdio: 'inherit', shell: true, env: process.env });
   process.exit(result.status != null ? result.status : 1);
 })();

@@ -47,7 +47,6 @@ class ServiceManager {
   }
 
   get whisperServerScript() { return path.join(this._root, 'faster-whisper-server.py'); }
-  get nllbModelDir() { return path.join(this._root, 'nllb-models'); }
   get nllbCt2ServerScript() { return path.join(this._root, 'nllb-ct2-server.py'); }
 
   /** Prefers bundled Python (python-embed/python.exe), falls back to system Python. */
@@ -83,7 +82,7 @@ class ServiceManager {
   }
 
   _spawnWhisper(port, modelSize, language) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const script = this.whisperServerScript;
       const args = [
         script,
@@ -92,6 +91,7 @@ class ServiceManager {
         '--model', modelSize,
         '--device', 'cpu',
         '--compute-type', 'int8',
+        '--cpu-threads', '4',
       ];
       if (language) args.push('--language', language);
 
@@ -104,20 +104,31 @@ class ServiceManager {
       this._whisperProc = proc;
 
       let resolved = false;
-      const done = () => { if (!resolved) { resolved = true; resolve(); } };
+      const done = (err) => {
+        if (!resolved) {
+          resolved = true;
+          if (err) reject(err); else resolve();
+        }
+      };
 
       const onData = (d) => {
         const line = d.toString().trim();
         if (line) console.log('[faster-whisper]', line);
-        if (/listening/i.test(line)) { this._restartCount = 0; done(); }
-        if (!resolved && /missing|not found|sys\.exit/i.test(line)) done();
+        if (/listening/i.test(line)) { this._restartCount = 0; done(null); }
+        if (!resolved && /missing|not found|sys\.exit/i.test(line)) {
+          done(new Error('[faster-whisper] ' + line));
+        }
       };
       proc.stdout.on('data', onData);
       proc.stderr.on('data', onData);
-      proc.on('error', (e) => { console.error('[faster-whisper] error:', e.message); done(); });
+      proc.on('error', (e) => {
+        console.error('[faster-whisper] error:', e.message);
+        done(e);
+      });
       proc.on('exit', (code) => {
         this._whisperProc = null;
         console.log('[faster-whisper] exited', code);
+        if (!resolved) done(new Error('[faster-whisper] process exited with code ' + code));
         if (!this._stopping && this._restartCount < MAX_RESTARTS) {
           this._restartCount++;
           setTimeout(() => {
@@ -126,8 +137,8 @@ class ServiceManager {
         }
       });
 
-      // Model download + load can take 30-60s on first run
-      setTimeout(done, 120000);
+      // Model load can take up to 120s on first run — reject on timeout
+      setTimeout(() => done(new Error('[faster-whisper] timeout waiting for server to start')), 120000);
     });
   }
 
@@ -148,11 +159,9 @@ class ServiceManager {
 
   // ── NLLB CTranslate2 server ──────────────────────────────────────
   /**
-   * Start the Python CTranslate2 NLLB server if:
-   *   - nllb-ct2-server.py exists
-   *   - Python is available
-   *   - nllb-ct2-model/model.bin exists (run scripts/setup-nllb-ct2.py first)
-   * Silently skips and falls back to ONNX if any condition is not met.
+   * Start the Python CTranslate2 NLLB server.
+   * Requires: nllb-ct2-server.py + python-embed + nllb-ct2-model/model.bin
+   * All three are guaranteed by scripts/setup-check.js (runs before npm start).
    */
   startNLLB(cfg = {}) {
     if (this._nllbProc) return Promise.resolve();
@@ -161,7 +170,7 @@ class ServiceManager {
     const ct2Model = path.join(this._root, 'nllb-ct2-model', 'model.bin');
 
     if (!fs.existsSync(script) || !fs.existsSync(ct2Model)) {
-      console.log('[nllb-ct2] CT2 server not available — using ONNX fallback');
+      console.warn('[nllb-ct2] server script or model not found — translation unavailable');
       return Promise.resolve();
     }
 
