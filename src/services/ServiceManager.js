@@ -99,7 +99,15 @@ class ServiceManager {
 
       const proc = spawn(
         this._pythonExe, args,
-        { stdio: 'pipe', shell: false },
+        {
+          stdio: 'pipe',
+          shell: false,
+          env: {
+            ...process.env,
+            HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
+            HF_HUB_DISABLE_PROGRESS_BARS: '1',
+          },
+        },
       );
       this._whisperProc = proc;
 

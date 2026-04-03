@@ -127,17 +127,40 @@ def main():
 
     # ── Resolve model path ─────────────────────────────────────────────
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    model_dir = os.path.join(root_dir, "whisper-models", f"faster-whisper-{args.model}")
 
-    # Use local model if available, otherwise download from HuggingFace
-    if os.path.isdir(model_dir) and os.path.exists(os.path.join(model_dir, "model.bin")):
-        model_path = model_dir
-        print(f"[faster-whisper] Using local model: {model_dir}", flush=True)
+    def _find_model_path(root, model_size):
+        """Return (path, needs_hf_download).
+        Checks flat dir first, then HF hub snapshot cache, then falls
+        back to a HF repo-ID so WhisperModel downloads on first run.
+        """
+        # 1. Flat local directory — fastest, direct load
+        flat = os.path.join(root, "whisper-models", f"faster-whisper-{model_size}")
+        if os.path.isdir(flat) and os.path.exists(os.path.join(flat, "model.bin")):
+            return flat, False
+
+        # 2. HuggingFace hub snapshot cache (created by setup-check.js)
+        import glob
+        snapshot_pattern = os.path.join(
+            root, "whisper-models",
+            f"models--Systran--faster-whisper-{model_size}",
+            "snapshots", "*", "model.bin",
+        )
+        hits = glob.glob(snapshot_pattern)
+        if hits:
+            return os.path.dirname(hits[0]), False  # direct path → no network
+
+        # 3. First-run fallback: download via HF hub
+        return f"Systran/faster-whisper-{model_size}", True
+
+    model_path, needs_download = _find_model_path(root_dir, args.model)
+
+    if needs_download:
+        print(f"[faster-whisper] Model not cached — will download: {model_path}", flush=True)
     else:
-        # Download to whisper-models/ on first run
-        model_path = f"Systran/faster-whisper-{args.model}"
-        print(f"[faster-whisper] Will download model: {model_path}", flush=True)
-        print(f"[faster-whisper] Cache dir: {model_dir}", flush=True)
+        print(f"[faster-whisper] Using local model: {model_path}", flush=True)
+        # Disable all HF hub network activity — model is already on disk
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
     # ── Load model ─────────────────────────────────────────────────────
     print(f"[faster-whisper] Loading model '{args.model}' (device={args.device}, "
@@ -149,6 +172,7 @@ def main():
         compute_type=args.compute_type,
         download_root=os.path.join(root_dir, "whisper-models"),
         cpu_threads=args.cpu_threads,
+        local_files_only=not needs_download,
     )
     print("[faster-whisper] Model ready.", flush=True)
 

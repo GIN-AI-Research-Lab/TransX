@@ -287,17 +287,17 @@ app.whenReady().then(async () => {
   }
   svcMgr.startNLLB(cfg).catch((e) => console.warn('[nllb-ct2]', e.message));
 
-  // ── Start Whisper in background, notify renderer when ready ───────────────
-  // Renderer shows "⏳ Đang khởi động..." and disables Start until this resolves.
+  // ── Notify renderer when Whisper is ready ────────────────────────────────
+  // Uses the promise from the early spawn above (before app.whenReady).
+  // Do NOT call startWhisper again — it would return Promise.resolve() immediately
+  // (proc already running) and send service:status before the page has loaded.
   tray.setToolTip('Trans Overlay — starting Whisper...');
-  svcMgr.startWhisper(cfg)
+  _whisperStartPromise
     .then(() => {
-      console.log('[app] faster-whisper ready');
       tray.setToolTip('Trans Overlay');
       overlayWin?.webContents.send('service:status', { whisper: 'ready' });
     })
     .catch((e) => {
-      console.error('[app] faster-whisper failed:', e.message);
       tray.setToolTip('Trans Overlay — Whisper error');
       overlayWin?.webContents.send('service:status', { whisper: 'error', msg: e.message });
     });
